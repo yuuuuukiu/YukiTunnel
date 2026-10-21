@@ -66,6 +66,11 @@ type Registry struct {
 	client *http.Client
 	index  *Index
 	source string
+	// indexDir is the URL prefix the current index was fetched from, so that
+	// relative profile paths inside it resolve against the same directory.
+	// The registry repo keeps everything under profiles/, while an R2 bucket
+	// may keep it at the root; guessing wrong makes every install 404.
+	indexDir string
 }
 
 // New builds a registry.
@@ -180,6 +185,9 @@ func (r *Registry) fetchFrom(ctx context.Context, mirror string) (*Index, error)
 		if err != nil {
 			return nil, err
 		}
+		// Remember "<mirror>/<dir>" (e.g. https://host/profiles) so relative
+		// paths in the index resolve next to it instead of at the mirror root.
+		r.indexDir = indexURL[:len(indexURL)-len("/index.json")]
 		r.saveCache(rawIndex, rawSig)
 		return idx, nil
 	}
@@ -296,11 +304,19 @@ func (r *Registry) Load(ctx context.Context, id string) (*cloudprofile.Profile, 
 	if entry == nil {
 		return nil, fmt.Errorf("profile %q not found in index", id)
 	}
-	// Try each mirror until one yields bytes matching the signed hash.
-	var errs []string
+	// Try each candidate directory until one yields bytes matching the signed
+	// hash. The index's own directory comes first; mirror roots are the
+	// fallback for older layouts that kept the index at the top level.
+	dirs := make([]string, 0, len(r.opts.Mirrors)+1)
+	if r.indexDir != "" {
+		dirs = append(dirs, r.indexDir)
+	}
 	for _, mirror := range r.opts.Mirrors {
-		base := strings.TrimRight(mirror, "/")
-		raw, err := r.get(ctx, base+"/"+strings.TrimLeft(entry.Path, "/"), 1<<20)
+		dirs = append(dirs, strings.TrimRight(mirror, "/"))
+	}
+	var errs []string
+	for _, mirror := range dirs {
+		raw, err := r.get(ctx, mirror+"/"+strings.TrimLeft(entry.Path, "/"), 1<<20)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", mirror, err))
 			continue

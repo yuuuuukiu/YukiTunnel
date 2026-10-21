@@ -171,7 +171,13 @@ jobs:
           	if err != nil {
           		t.Fatal(err)
           	}
-          	if _, err := VerifyIndex(rawIndex, rawSig, map[string]ed25519.PublicKey{"verifying": pub}); err != nil {
+          	// The trust map is keyed by the key_id embedded in the signature, so
+          	// an invented name here would always report "not trusted".
+          	keyID := os.Getenv("PROFILE_KEY_ID")
+          	if keyID == "" {
+          		keyID = "yuki-profiles-2026"
+          	}
+          	if _, err := VerifyIndex(rawIndex, rawSig, map[string]ed25519.PublicKey{keyID: pub}); err != nil {
           		t.Fatalf("index failed verification: %v", err)
           	}
           }
@@ -205,6 +211,12 @@ jobs:
       # fallback race and serve an old catalogue.
       - name: Sync to Cloudflare R2
         if: ${{ env.R2_ENDPOINT != '' }}
+        # The AWS CLI only reads AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, so
+        # map our R2_* secrets onto those names here.
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
         run: |
           set -euo pipefail
           command -v aws >/dev/null || pip install --quiet awscli

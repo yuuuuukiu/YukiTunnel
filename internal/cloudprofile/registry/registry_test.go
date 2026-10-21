@@ -27,6 +27,9 @@ type fixture struct {
 	profileID  string
 	profileSHA string
 	trusted    map[string]ed25519.PublicKey
+	// priv is the fixture signing key, used by tests that need to re-sign a
+	// modified index.
+	priv ed25519.PrivateKey
 }
 
 // newFixture builds a signed index + profile pair on disk.
@@ -90,6 +93,7 @@ spec:
 		dir: dir, index: rawIndex, sig: rawSig, profile: profile,
 		profileID: "test-profile", profileSHA: sha,
 		trusted: map[string]ed25519.PublicKey{"test-key": pub},
+		priv:    priv,
 	}
 }
 
@@ -415,5 +419,95 @@ func TestChallengeFailureStaysTransportError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "challenge") {
 		t.Fatalf("error should explain the challenge: %v", err)
+	}
+}
+
+// TestLoadResolvesProfileRelativeToIndexDir covers a layout mismatch that made
+// every real install fail: the registry repo keeps index.json and the YAMLs
+// under profiles/, and the index records bare filenames ("foo.yaml"), so
+// resolving against the mirror root 404s.
+func TestLoadResolvesProfileRelativeToIndexDir(t *testing.T) {
+	f := newFixture(t, false)
+
+	// Re-sign an index whose Path is a bare filename, then serve the whole
+	// thing from <root>/profiles/.
+	idx := Index{
+		Schema:      1,
+		GeneratedAt: time.Now().UTC(),
+		KeyID:       "test-key",
+		Profiles: []IndexProfile{{
+			ID: "test-profile", Vendor: "aliyun", Name: "Test", Version: "1.0.0",
+			Path: "test-profile.yaml", SHA256: f.profileSHA,
+		}},
+	}
+	rawIndex, _ := json.Marshal(idx)
+	rawSig := f.signIndex(t, rawIndex)
+
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "profiles")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(sub, "index.json"), rawIndex, 0o644)
+	_ = os.WriteFile(filepath.Join(sub, "index.json.sig"), rawSig, 0o644)
+	_ = os.WriteFile(filepath.Join(sub, "test-profile.yaml"), f.profile, 0o644)
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	defer srv.Close()
+
+	r, _ := New(Options{Mirrors: []string{srv.URL}, TrustedKeys: f.trusted})
+	p, err := r.Load(context.Background(), "test-profile")
+	if err != nil {
+		t.Fatalf("load from profiles/ subdirectory: %v", err)
+	}
+	if p.Metadata.ID != "test-profile" {
+		t.Fatalf("unexpected profile: %s", p.Metadata.ID)
+	}
+	if !strings.HasSuffix(p.Source, "/profiles") {
+		t.Fatalf("source should point at the index directory, got %q", p.Source)
+	}
+}
+
+// signIndex re-signs a modified index with the fixture's private key.
+func (f *fixture) signIndex(t *testing.T, rawIndex []byte) []byte {
+	t.Helper()
+	sig := ed25519.Sign(f.priv, rawIndex)
+	env := SignatureEnvelope{
+		Schema: 1, KeyID: "test-key", Algorithm: "ed25519",
+		Signature: base64.StdEncoding.EncodeToString(sig),
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// TestLoadRejectsHashMismatchKeepsGoing ensures a tampered profile aborts
+// instead of silently falling through to another mirror.
+func TestLoadRejectsHashMismatchAborts(t *testing.T) {
+	f := newFixture(t, false)
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "profiles")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"index.json", "index.json.sig"} {
+		raw, _ := os.ReadFile(filepath.Join(f.dir, name))
+		_ = os.WriteFile(filepath.Join(sub, name), raw, 0o644)
+	}
+	// Serve a profile whose bytes do not match the signed hash.
+	_ = os.WriteFile(filepath.Join(sub, f.profileID+".yaml"), []byte("apiVersion: yukitunnel.io/v1\nkind: CloudProfile\n"), 0o644)
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	defer srv.Close()
+
+	r, _ := New(Options{Mirrors: []string{srv.URL}, TrustedKeys: f.trusted})
+	_, err := r.Load(context.Background(), f.profileID)
+	if err == nil {
+		t.Fatal("expected a hash mismatch")
+	}
+	if !errors.Is(err, ErrVerification) {
+		t.Fatalf("hash mismatch must be an integrity failure, got %v", err)
 	}
 }

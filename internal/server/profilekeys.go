@@ -47,6 +47,16 @@ func CheckReleaseReadiness() error {
 	return nil
 }
 
+// TrustedProfileKeys returns the trusted key set for the profile registry.
+//
+// Exported so the server CLI verifies signatures with exactly the same keys as
+// the HTTP API. Keeping two copies of this logic previously let the CLI drift
+// onto the development key, which made every published index fail to verify
+// from the command line while working through the API.
+func TrustedProfileKeys() map[string]ed25519.PublicKey {
+	return builtinProfileKeys()
+}
+
 // builtinProfileKeys returns the trusted key set.
 func builtinProfileKeys() map[string]ed25519.PublicKey {
 	keys := map[string]ed25519.PublicKey{}

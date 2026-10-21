@@ -5,7 +5,7 @@
 | # | 验收标准 | 实现 | 验证方式 | 结果 |
 | --- | --- | --- | --- | --- |
 | 1 | `docker compose up -d` 启动服务端与 WebUI | `docker-compose.yml`、`Dockerfile`、`deploy/docker-entrypoint.sh` | `bash scripts/e2e-local.sh`（Docker 模式） | ✅ |
-| 2 | 桌面 GUI 一键部署后 WebUI 可访问 | `desktop/src-tauri/src/deploy.rs` | `cargo check`；向导截图 | ✅ 代码就绪 |
+| 2 | 桌面 GUI 一键部署后 WebUI 可访问 | `desktop/src-tauri/src/deploy.rs` | macOS DMG 实机运行 | ✅ 已验证 |
 | 3 | 服务端 CLI 完成初始化/用户/节点/域名/健康检查 | `internal/servercli` | `scripts/smoke.sh`、`scripts/e2e-local.sh` | ✅ |
 | 4 | 三端功能一致 | WebUI / 桌面端 / CLI | `TestAdminCreatesUserAndTunnel`、`TestDomainBindingToggle` | ✅ |
 | 5 | 客户端首次配置 + 密码/Key 登录 | `Connect.tsx`、`yuki login` | `TestKeyAuthFlow` | ✅ |
@@ -15,7 +15,7 @@
 | 8 | 启动生效、停止失效 | `Hub.StartTunnelFor` / `Hub.StopTunnel` | `internal/tunnel` 集成测试 + e2e | ✅ |
 | 9 | CLI 覆盖 GUI 核心流程并支持 `--json` | `internal/cli` | `scripts/e2e-local.sh` | ✅ |
 | 10 | 云 Profile 安装/执行/回收 | `internal/cloudprofile` | 见 [ACCEPTANCE-PROFILES.md](ACCEPTANCE-PROFILES.md) | ✅ |
-| 11 | 系统防火墙自动放行 | `internal/firewall` | `internal/firewall` 测试（fake runner） | ✅ 代码就绪 |
+| 11 | 系统防火墙自动放行 | `internal/firewall` | fake runner 测试 + Linux 容器内真实 ufw/nftables | ✅ 已验证 |
 
 ## 2. 自动化验证
 

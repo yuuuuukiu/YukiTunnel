@@ -113,7 +113,8 @@ cd desktop/src-tauri && cargo check
 - [ ] 隧道启动后公网地址可从外部访问
 - [ ] 停止隧道后端口立即不可达
 - [ ] 客户端断网 30 秒恢复后隧道自动重连
-- [ ] 桌面端 `.app` / `.dmg` / `.exe` 安装包可安装并启动
+- [x] macOS DMG 生成并实机启动（`YukiTunnel_0.1.0_aarch64.dmg`，15.45 MiB）
+- [ ] Windows `.exe` / Linux AppImage 安装包实机验证
 - [ ] 桌面端管理员登录后能看到「管理」分组（7 个页面）
 - [ ] 桌面端「部署服务端」向导完整跑通一次
 

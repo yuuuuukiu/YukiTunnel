@@ -24,7 +24,7 @@ const placeholderProfileKey = "PLACEHOLDER_REPLACE_AT_RELEASE"
 // Release builds MUST replace this constant (see scripts/gen-profile-signing-key.sh).
 // Development builds fall back to a deterministic key so tests and local runs
 // work, but refuse to start when YUKI_RELEASE=1.
-const builtinProfileKeyB64 = placeholderProfileKey
+const builtinProfileKeyB64 = "VvTD4OhpYRJQZIoWOuFX3dnha62yLoAXqlnRG1TQ61s="
 
 // ErrPlaceholderKeyInRelease is returned when a release build still carries the
 // development placeholder key.

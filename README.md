@@ -221,6 +221,7 @@ make help           # 全部命令
 
 | 文档 | 内容 |
 | --- | --- |
+| [STATUS.md](STATUS.md) | **当前状态：已完成什么、还差什么** |
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | 5 分钟跑通 + 常见错误排查 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Compose 参数、R2 secrets、镜像与代理 |
 | [docs/PROFILE-GUIDE.md](docs/PROFILE-GUIDE.md) | Profile YAML 格式、签名、PR 流程 |

@@ -91,6 +91,7 @@ CI                    连续 9 次 success
 | `apierr.Wrapf` 吞掉状态码 | 404/403 被降级成 500，掩盖真实原因 |
 | `apierr.As(nil)` 会 panic | HTTP handler 崩溃而非返回错误 |
 | 登录限流桶不可重置 | 测试互相干扰，产生误导性 429 |
+| registry 走 HTTP/2 被 Cloudflare 拦截 | R2 镜像完全不可用（403 challenge） |
 
 ---
 
@@ -131,7 +132,7 @@ git push origin v0.1.0
 
 | 限制 | 影响 | 对策 |
 | --- | --- | --- |
-| Cloudflare 代理的 R2 域名拒绝 Go 客户端 | 强制只用 R2 会 403 | 默认链 jsDelivr 在前，不受影响；或关掉 Bot Fight Mode |
+| ~~Cloudflare 代理的 R2 域名拒绝 Go 客户端~~ | **已修复**：registry 客户端固定 HTTP/1.1，R2 可正常使用 | — |
 | AWS / 华为云 / Azure / GCP 未真实联调 | 可能因账号策略失败 | 按 `docs/CLOUD-LIVE-TEST.md` 自测 |
 | 裸 iptables 不支持 | 需手工放行 | 改用 ufw/firewalld |
 | firewalld 无规则注释 | 对账依赖端口段推断 | 不要手工在同段加规则 |

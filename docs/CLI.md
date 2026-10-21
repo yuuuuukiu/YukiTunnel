@@ -6,7 +6,7 @@
 
 | 参数 | 说明 |
 | --- | --- |
-| `--json` | 以 JSON 输出，便于脚本 |
+| `--json` | 以 JSON 输出，便于脚本。**成功写 stdout，失败写 stderr** 且形如 `{"error":"…","success":false}` |
 | `-s, --server URL` | 覆盖服务端地址 |
 | `--token TOKEN` | 使用 API 令牌 |
 | `--key PATH` | RSA 私钥（Key 登录） |

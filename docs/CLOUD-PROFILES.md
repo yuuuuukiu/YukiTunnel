@@ -177,6 +177,32 @@ cp profiles/*.yaml internal/cloudprofile/bundled/
 go test ./internal/cloudprofile -run Bundled
 ```
 
+## 4ter. 已知限制：Cloudflare 代理的 R2 域名会拒绝 Go 客户端
+
+`tunnel.yuuuuukiu.top` 通过 Cloudflare 自定义域指向 R2 bucket。实测：
+
+| 客户端 | 结果 |
+| --- | --- |
+| `curl`（OpenSSL/BoringSSL TLS 指纹） | `200` |
+| Go `crypto/tls`（任意 User-Agent） | `403` + `cf-mitigated: challenge` |
+
+差异来自 **TLS 指纹**而非请求头：换成浏览器 UA、`Accept`、`Connection: close`
+均无效。Cloudflare 的 bot 检测识别出 Go 的 ClientHello 特征并下发 JS 挑战。
+
+影响与对策：
+
+- **默认镜像链不受影响**：jsDelivr 与 GitHub raw 排在 R2 之前，正常情况下不会走到
+  R2。三个源的哈希已验证一致。
+- **强制只走 R2 会失败**：`YUKI_PROFILE_MIRRORS="https://tunnel.yuuuuukiu.top"`
+  会报 `HTTP 403 (challenge not passed)`。
+- 该失败被正确归类为**传输错误**（而非完整性错误），因此客户端仍会回退到内置
+  profile，不会中断。
+
+如果必须让 R2 成为主源，需要二选一：
+
+1. 在 Cloudflare 关闭该 hostname 的 Bot Fight Mode / 安全级别调到 Essentially Off
+2. 改用不经 Cloudflare 代理的 R2 S3 端点（无缓存优势，但 Go 可直连）
+
 ## 5. 安全设计
 
 - **签名永远校验**：先取 `index.json` + `index.json.sig`，用内置公钥验签；再按 index 里的 `sha256` 校验每个 profile。任一环节失败 → 该源作废。

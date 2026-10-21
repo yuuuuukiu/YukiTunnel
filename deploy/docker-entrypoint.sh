@@ -56,4 +56,18 @@ elif [ "${YUKI_DOMAIN_BINDING:-}" = "false" ]; then
   yuki-server domain binding off --data-dir "$DATA_DIR" >/dev/null 2>&1 || true
 fi
 
+# Print admin credentials banner in docker logs if available
+if [ -f "$DATA_DIR/admin-token.txt" ]; then
+  TOKEN_VAL=$(grep '^token:' "$DATA_DIR/admin-token.txt" | awk '{print $2}')
+  if [ -n "$TOKEN_VAL" ]; then
+    echo "============================================================"
+    echo "  [YukiTunnel Docker] 管理员远程管理凭据"
+    echo "  管理 Token: $TOKEN_VAL"
+    echo "  远程管理命令示例:"
+    echo "    yuki-server --server https://<宿主机IP>:8443 --token $TOKEN_VAL status"
+    echo "    yuki-server --server https://<宿主机IP>:8443 --token $TOKEN_VAL user list"
+    echo "============================================================"
+  fi
+fi
+
 exec yuki-server "$@"

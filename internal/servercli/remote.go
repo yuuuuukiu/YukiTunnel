@@ -23,9 +23,9 @@ func NewRemoteBackend(serverURL, token, username, password string, insecure bool
 	if cfg.ServerURL == "" {
 		return nil, fmt.Errorf("请提供 --server 地址")
 	}
-	if cfg.Token == "" {
+	if cfg.Token == "" && (username != "" || password != "") {
 		if username == "" || password == "" {
-			return nil, fmt.Errorf("远程模式需要 --token 或 --username/--password")
+			return nil, fmt.Errorf("密码登录需要同时提供 --username 与 --password")
 		}
 		if _, err := cliutil.Login(cfg, username, password); err != nil {
 			return nil, err

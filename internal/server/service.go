@@ -201,11 +201,65 @@ func (s *Service) EnsureBootstrap() error {
 			s.Log.Warn("YUKI_ADMIN_PASSWORD not set; using the default password, change it immediately")
 		}
 		username := envOr("YUKI_ADMIN_USERNAME", "admin")
-		if _, err := s.Auth.CreateUser(ctx, username, "Administrator", password, "admin"); err != nil {
+		_, err := s.Auth.CreateUser(ctx, username, "Administrator", password, "admin")
+		if err != nil {
 			return fmt.Errorf("bootstrap admin: %w", err)
 		}
 		s.Log.Info("bootstrap admin created", "username", username)
 		_ = s.audit(ctx, nil, "admin.bootstrap", "user", username, "initial administrator", "")
+	}
+
+	// Ensure an admin API token file exists for remote management
+	tokenFile := filepath.Join(s.Cfg.DataDir, "admin-token.txt")
+	if _, err := os.Stat(tokenFile); os.IsNotExist(err) {
+		users, err := s.Store.ListUsers(ctx)
+		if err == nil {
+			var adminUser *store.User
+			for i := range users {
+				if users[i].Role == "admin" && !users[i].Disabled {
+					adminUser = &users[i]
+					break
+				}
+			}
+			if adminUser != nil {
+				ttlHours := 8760
+				if str := os.Getenv("YUKI_ADMIN_TOKEN_TTL_HOURS"); str != "" {
+					if v, err := strconv.Atoi(str); err == nil && v > 0 {
+						ttlHours = v
+					}
+				}
+				plain, hash := auth.NewToken()
+				now := time.Now().UTC()
+				tok := &store.APIToken{
+					ID:        ids.Hex(12),
+					UserID:    adminUser.ID,
+					Name:      "admin-bootstrap",
+					TokenHash: hash,
+					Scope:     "admin",
+					CreatedAt: now,
+					ExpiresAt: now.Add(time.Duration(ttlHours) * time.Hour),
+				}
+				if err := s.Store.CreateAPIToken(ctx, tok); err == nil {
+					_ = os.WriteFile(tokenFile, []byte(fmt.Sprintf(
+						"# YukiTunnel 管理员 API 令牌（用于远程管理）\n"+
+							"# 远程管理命令：yuki-server --server https://<服务端IP>:8443 --token <此值> <命令>\n"+
+							"token: %s\nexpires: %s\n",
+						plain, tok.ExpiresAt.Format(time.RFC3339))), 0o600)
+					s.Log.Info("admin remote token generated", "token", plain, "file", tokenFile)
+					fmt.Println()
+					fmt.Println("============================================================")
+					fmt.Println("  [YukiTunnel] 管理员远程管理凭据 (Admin Token)")
+					fmt.Println("============================================================")
+					fmt.Printf("  管理令牌 (Token) ：%s\n", plain)
+					fmt.Printf("  令牌凭据文件     ：%s (0600 权限)\n", tokenFile)
+					fmt.Printf("  远程管理命令示例 ：\n")
+					fmt.Printf("    yuki-server --server https://<服务端IP>:8443 --token %s status\n", plain)
+					fmt.Printf("    yuki-server --server https://<服务端IP>:8443 --token %s user list\n", plain)
+					fmt.Println("============================================================")
+					fmt.Println()
+				}
+			}
+		}
 	}
 	nodes, err := s.Store.ListNodes(ctx)
 	if err != nil {

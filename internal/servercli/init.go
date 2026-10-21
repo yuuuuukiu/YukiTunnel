@@ -36,6 +36,8 @@ func newInitCmd() *cobra.Command {
 		certFile     string
 		keyFile      string
 		force        bool
+		noAdminToken bool
+		tokenTTL     int
 	)
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -47,6 +49,7 @@ func newInitCmd() *cobra.Command {
   <data-dir>/yukitunnel.db    SQLite 数据库
   <data-dir>/tls/server.crt   自签名证书（未指定 --tls-cert 时）
   <data-dir>/admin.txt        首次生成的管理员密码（仅当未指定 --admin-password）
+  <data-dir>/admin-token.txt  管理员 API 令牌（用于远程管理）
 
 之后可直接运行 yuki-server start 启动服务端。`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -183,6 +186,34 @@ func newInitCmd() *cobra.Command {
 					_ = st.SetSetting(ctx, k, v)
 				}
 			}
+			var adminTokenVal string
+			tokenFile := filepath.Join(dir, "admin-token.txt")
+			if !noAdminToken {
+				if !force {
+					if b, err := os.ReadFile(tokenFile); err == nil {
+						for _, line := range strings.Split(string(b), "\n") {
+							line = strings.TrimSpace(line)
+							if strings.HasPrefix(line, "token:") {
+								adminTokenVal = strings.TrimSpace(strings.TrimPrefix(line, "token:"))
+								break
+							}
+						}
+					}
+				}
+				if adminTokenVal == "" {
+					plain, terr := createAdminToken(ctx, st, tokenTTL)
+					if terr != nil {
+						return fmt.Errorf("创建管理员令牌失败：%w", terr)
+					}
+					adminTokenVal = plain
+					_ = os.WriteFile(tokenFile, []byte(fmt.Sprintf(
+						"# YukiTunnel 管理员 API 令牌（用于远程管理）\n"+
+							"# 远程管理命令：yuki-server --server https://<服务端IP>:8443 --token <此值> <命令>\n"+
+							"token: %s\nexpires: %s\n",
+						plain, time.Now().Add(time.Duration(tokenTTL)*time.Hour).Format(time.RFC3339))), 0o600)
+				}
+			}
+
 			fp, _ := tlsutil.FingerprintFile(cfg.TLS.CertFile)
 			out := map[string]any{
 				"ok": true, "data_dir": dir, "config": cfgPath,
@@ -191,6 +222,10 @@ func newInitCmd() *cobra.Command {
 				"domain_suffix": cfg.Domain.Suffix, "port_range": fmt.Sprintf("%d-%d", cfg.Ports.Min, cfg.Ports.Max),
 				"admin_created": createdAdmin, "admin_user": adminUser,
 				"tls_cert": cfg.TLS.CertFile, "tls_fingerprint": fp,
+			}
+			if adminTokenVal != "" {
+				out["admin_token"] = adminTokenVal
+				out["admin_token_file"] = tokenFile
 			}
 			if isJSON() {
 				return printJSON(out)
@@ -211,6 +246,29 @@ func newInitCmd() *cobra.Command {
 					fmt.Printf("\n  管理员账号 ：%s（密码为你指定的值）\n", adminUser)
 				}
 			}
+
+			if adminTokenVal != "" {
+				apiHost := cfg.APIAddr
+				if strings.HasPrefix(apiHost, "0.0.0.0:") {
+					pub := cfg.PublicHost
+					if pub == "" {
+						pub = "<服务端IP>"
+					}
+					_, port, _ := net.SplitHostPort(apiHost)
+					apiHost = net.JoinHostPort(pub, port)
+				}
+				fmt.Println("\n============================================================")
+				fmt.Println("  管理员远程管理令牌 (Admin API Token)")
+				fmt.Println("============================================================")
+				fmt.Printf("  管理令牌 (Token) ：%s\n", adminTokenVal)
+				fmt.Printf("  令牌凭据文件     ：%s (0600 权限)\n", tokenFile)
+				fmt.Printf("  远程管理命令示例 ：\n")
+				fmt.Printf("    yuki-server --server https://%s --token %s status\n", apiHost, adminTokenVal)
+				fmt.Printf("    yuki-server --server https://%s --token %s user list\n", apiHost, adminTokenVal)
+				fmt.Printf("    yuki-server --server https://%s --token %s tunnel list\n", apiHost, adminTokenVal)
+				fmt.Println("============================================================")
+			}
+
 			fmt.Printf("\n下一步：yuki-server start\n")
 			return nil
 		},
@@ -227,6 +285,8 @@ func newInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&certFile, "tls-cert", "", "已有 TLS 证书路径")
 	cmd.Flags().StringVar(&keyFile, "tls-key", "", "已有 TLS 私钥路径")
 	cmd.Flags().BoolVar(&force, "force", false, "覆盖已有配置")
+	cmd.Flags().BoolVar(&noAdminToken, "no-admin-token", false, "不生成远程管理 API 令牌")
+	cmd.Flags().IntVar(&tokenTTL, "admin-token-ttl-hours", defaultTokenTTL(), "管理员 API 令牌有效期（小时，默认 8760 即 1 年）")
 	return cmd
 }
 
@@ -252,3 +312,51 @@ func detectIP() string {
 }
 
 var _ = strings.TrimSpace
+
+// createAdminToken mints an API token for the first admin account.
+//
+// The plaintext is returned once and never stored: the database keeps only a
+// SHA-256 hash, so a lost token must be recreated rather than recovered.
+func createAdminToken(ctx context.Context, st *store.Store, ttlHours int) (string, error) {
+	admins, err := st.ListUsers(ctx)
+	if err != nil {
+		return "", err
+	}
+	var admin *store.User
+	for i := range admins {
+		if admins[i].Role == "admin" {
+			admin = &admins[i]
+			break
+		}
+	}
+	if admin == nil {
+		return "", fmt.Errorf("没有可用的管理员账号")
+	}
+	if ttlHours <= 0 {
+		ttlHours = defaultTokenTTL()
+	}
+	plain, hash := auth.NewToken()
+	now := time.Now().UTC()
+	tok := &store.APIToken{
+		ID:        ids.Hex(12),
+		UserID:    admin.ID,
+		Name:      "admin-cli",
+		TokenHash: hash,
+		Scope:     "admin",
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Duration(ttlHours) * time.Hour),
+	}
+	if err := st.CreateAPIToken(ctx, tok); err != nil {
+		return "", err
+	}
+	return plain, nil
+}
+
+func defaultTokenTTL() int {
+	if s := os.Getenv("YUKI_ADMIN_TOKEN_TTL_HOURS"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			return v
+		}
+	}
+	return 8760 // 1 year default
+}

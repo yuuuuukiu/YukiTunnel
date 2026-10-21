@@ -90,6 +90,9 @@ CI                    连续 9 次 success
 | TLS 指纹不折叠大小写 | 手工复制的指纹永远匹配失败 |
 | `apierr.Wrapf` 吞掉状态码 | 404/403 被降级成 500，掩盖真实原因 |
 | `apierr.As(nil)` 会 panic | HTTP handler 崩溃而非返回错误 |
+| CLI / API 远程管理支持 | 支持 `--server` 与 `--token` 远程管理一切功能 |
+| 自动生成管理 Token | 二进制部署与 Docker 部署均自动生成并保存 `<data>/admin-token.txt` |
+| Docker 日志自动输出管理 Token | 容器启动/初始化日志自动打印 Token 与远程命令，开箱即用 |
 | 登录限流桶不可重置 | 测试互相干扰，产生误导性 429 |
 | registry 走 HTTP/2 被 Cloudflare 拦截 | R2 镜像完全不可用（403 challenge） |
 

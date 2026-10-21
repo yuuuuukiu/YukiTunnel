@@ -224,6 +224,41 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "显示服务端运行状态与健康检查",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if g.server != "" {
+				b, err := backend(cmd.Context())
+				if err != nil {
+					return err
+				}
+				h, err := b.Health(cmd.Context())
+				alive := err == nil
+				out := map[string]any{
+					"mode":    "remote",
+					"server":  g.server,
+					"running": alive,
+					"healthy": alive,
+				}
+				if err != nil {
+					out["health_error"] = err.Error()
+				} else {
+					for k, v := range h {
+						out[k] = v
+					}
+				}
+				if isJSON() {
+					return printJSON(out)
+				}
+				fmt.Printf("管理模式：远程 (server: %s)\n", g.server)
+				fmt.Printf("运行状态：%s\n", map[bool]string{true: "运行中", false: "未响应"}[alive])
+				if err == nil {
+					fmt.Println("健康检查：✓ 正常")
+					if ver, ok := h["version"].(string); ok && ver != "" {
+						fmt.Printf("版本    ：%s\n", ver)
+					}
+				} else {
+					fmt.Printf("健康检查：✗ %s\n", err)
+				}
+				return nil
+			}
 			cfg, err := loadServerConfig()
 			if err != nil {
 				return err

@@ -54,6 +54,7 @@ docker compose logs -f yuki-server
 /data/tls/server.crt|key
 /data/logs/
 /data/admin.txt            (仅随机密码时存在)
+/data/admin-token.txt      (管理员 API 令牌，0600)
 /data/profiles-cache/      (验签后的 profile 索引缓存)
 ```
 
@@ -189,7 +190,52 @@ sudo journalctl -u yuki-server -f
 
 ---
 
-## 4. TLS
+## 4. 远程管理与管理 Token (Admin Token)
+
+无论是 **Docker 部署** 还是 **二进制部署**，服务端在首次初始化与启动时都会**自动生成专属的管理员 API 令牌**，并保存至 `<data-dir>/admin-token.txt`（0600 权限）。
+
+### 4.1 获取管理 Token
+
+- **Docker 容器**：直接查看容器日志，开箱立得：
+  ```bash
+  docker logs yuki-server
+  ```
+  日志中会自动输出管理 Token 以及可直接复制的远程命令。
+- **二进制部署**：执行 `yuki-server init` 时控制台会自动输出管理 Token，并保存在数据目录：
+  ```bash
+  cat /var/lib/yukitunnel/admin-token.txt
+  ```
+
+### 4.2 远程管理使用方式
+
+使用本地的 `yuki-server` CLI，加上 `--server` 和 `--token` 参数，即可远程管理远端或 Docker 中的服务端，无需 SSH 到目标服务器：
+
+```bash
+# 远程状态与健康检查（无需 token 亦可快速探测连通性）
+yuki-server --server https://<服务端IP>:8443 --insecure status
+
+# 远程用户管理
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure user list
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure user create --username bob --password 'pass123'
+
+# 远程节点与穿透隧道管理
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure node list
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure tunnel list
+
+# 远程云 Profile 管理
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure profile list
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure profile install aliyun-ecs-security-group
+
+# 远程配置查看与审计日志
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure config show
+yuki-server --server https://<服务端IP>:8443 --token <Token> --insecure audit list --limit 20
+```
+
+> 提示：若服务端为自签名证书，加上 `--insecure` 忽略 TLS 校验；配置正规域名与 Let's Encrypt 证书后可去掉 `--insecure`。
+
+---
+
+## 5. TLS
 
 - 默认自签名（10 年），生成到 `<data>/tls/`
 - 客户端首次连接可勾选「信任自签名证书」，或 CLI 加 `--insecure`

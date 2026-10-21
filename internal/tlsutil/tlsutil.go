@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode"
 )
 
 // Files describes where certificate material lives.
@@ -192,13 +193,17 @@ func ServerTLSConfigForClient(insecure bool, fingerprint string) *tls.Config {
 	return cfg
 }
 
+// normalizeFP reduces a fingerprint to lowercase hex with separators removed,
+// so a value pasted from openssl (uppercase, colon separated) matches the one we
+// compute internally. Without the case fold, pinning silently failed for every
+// operator who copied the certificate fingerprint by hand.
 func normalizeFP(s string) string {
-	out := ""
+	out := make([]rune, 0, len(s))
 	for _, c := range s {
-		if c == ':' || c == ' ' {
+		if c == ':' || c == ' ' || c == '-' {
 			continue
 		}
-		out += string(c)
+		out = append(out, unicode.ToLower(c))
 	}
-	return out
+	return string(out)
 }

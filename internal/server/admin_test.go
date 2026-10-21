@@ -1,8 +1,12 @@
 package server
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // TestAdminUserCRUD covers the full user lifecycle the WebUI and desktop
@@ -336,5 +340,77 @@ func TestTunnelCreateRequiresNode(t *testing.T) {
 	})
 	if !strings.Contains(body, "NODE_REQUIRED") {
 		t.Fatalf("expected NODE_REQUIRED, got %s", body)
+	}
+}
+
+// TestAdminKeyManagement covers adding, listing and deleting a user's RSA key,
+// which is the alternative to password login.
+func TestAdminKeyManagement(t *testing.T) {
+	s := newTestServer(t)
+	admin := s.adminToken(t)
+
+	var created struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	if code := s.do(t, "POST", "/admin/users", admin, map[string]any{
+		"username": "hank", "password": "hank12345", "role": "user",
+	}, &created); code != 201 {
+		t.Fatalf("create user: %d", code)
+	}
+	uid := created.User.ID
+
+	// An empty key list must serialise as [] rather than null, so the UI can
+	// call .map without a guard.
+	body := s.doRaw(t, "GET", "/admin/users/"+uid+"/keys", admin, nil)
+	if !strings.Contains(body, `"keys":[]`) {
+		t.Fatalf("empty key list should be [], got %s", body)
+	}
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The API expects an OpenSSH authorized_keys line, not PEM.
+	sshPub, err := ssh.NewPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authKey := ssh.MarshalAuthorizedKey(sshPub)
+
+	var added struct {
+		Key struct {
+			ID          string `json:"id"`
+			Fingerprint string `json:"fingerprint"`
+		} `json:"key"`
+	}
+	if code := s.do(t, "POST", "/admin/users/"+uid+"/keys", admin, map[string]any{
+		"name": "hank-key", "public_key": string(authKey),
+	}, &added); code != 201 {
+		t.Fatalf("add key: %d", code)
+	}
+	if added.Key.ID == "" || added.Key.Fingerprint == "" {
+		t.Fatalf("key response incomplete: %+v", added.Key)
+	}
+
+	body = s.doRaw(t, "GET", "/admin/users/"+uid+"/keys", admin, nil)
+	if !strings.Contains(body, "hank-key") {
+		t.Fatalf("key missing from list: %s", body)
+	}
+
+	// Garbage must be rejected with a client error, not a 500.
+	if code := s.do(t, "POST", "/admin/users/"+uid+"/keys", admin, map[string]any{
+		"name": "bad", "public_key": "not-a-pem",
+	}, nil); code < 400 || code >= 500 {
+		t.Fatalf("invalid key should be a client error, got %d", code)
+	}
+
+	if code := s.do(t, "DELETE", "/admin/users/"+uid+"/keys/"+added.Key.ID, admin, nil, nil); code != 200 {
+		t.Fatalf("delete key: %d", code)
+	}
+	body = s.doRaw(t, "GET", "/admin/users/"+uid+"/keys", admin, nil)
+	if strings.Contains(body, "hank-key") {
+		t.Fatalf("key still present after delete: %s", body)
 	}
 }

@@ -131,7 +131,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      # Docker Hub occasionally returns 5xx for manifest HEAD requests; retry
+      # rather than failing the whole run on an upstream blip.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        id: build1
+        with:
+          context: .
+          push: false
+          tags: yukitunnel/server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build image (retry)
+        if: ${{ steps.build1.outcome == 'failure' }}
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false

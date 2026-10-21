@@ -27,10 +27,14 @@ YukiTunnel 在隧道启动时自动放行公网端口，停止时回收，启动
 | Alpine + ufw active + `default deny incoming` | `ufw 已启用，入站默认 deny，自动放行` ✅ |
 | `ufw allow 20000/tcp comment yukitunnel` | 规则带 `# yukitunnel` 标记，v4/v6 各一条 ✅ |
 | `ufw --force delete allow 20000/tcp` | 规则被移除 ✅ |
+| Alpine + nftables `policy drop` | `nftables 已启用，入站默认 deny，自动放行` ✅ |
+| `nft add rule inet yukitunnel input tcp dport 20000 ...` | 独立表建链 + 带 `comment "yukitunnel"` 的规则 ✅ |
+| nft 幂等（先 `list chain` 再 `add`） | 第二次检测到已有规则，不重复添加 ✅ |
 | macOS（本机） | `unsupported（该平台请使用系统自带防火墙界面…）` ✅ |
 
-> 在 `--privileged` Linux 容器里用真实 ufw 验证了检测与命令语法；
-> firewalld / nftables 仍只有 fake-runner 测试覆盖。
+> 在 `--privileged` Linux 容器里用真实 ufw 与 nftables 验证了检测、建链、
+> 规则语法与幂等检查；**firewalld 仍只有 fake-runner 测试覆盖**
+> （容器里跑 systemd 成本过高）。
 
 ### 检测结果字段
 

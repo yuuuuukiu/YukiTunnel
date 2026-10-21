@@ -17,8 +17,27 @@ BUCKET="${R2_BUCKET:-yuki-tunnel-profile}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-command -v gh >/dev/null || { echo "error: gh CLI is required (https://cli.github.com)" >&2; exit 1; }
-gh auth status >/dev/null 2>&1 || { echo "error: run 'gh auth login' first" >&2; exit 1; }
+# Prefer SSH: most contributors already have a working key, while `gh auth` may
+# not be configured. Falls back to HTTPS (which then needs a token) if the SSH
+# probe fails.
+SSH_URL="git@github.com:$OWNER/$REPO.git"
+HTTPS_URL="https://github.com/$OWNER/$REPO.git"
+
+have_gh_auth() { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }
+
+repo_exists() {
+  # git ls-remote works with either transport and needs no API token.
+  GIT_SSH_COMMAND="ssh -o BatchMode=yes" git ls-remote "$SSH_URL" >/dev/null 2>&1
+}
+
+pick_url() {
+  if GIT_SSH_COMMAND="ssh -o BatchMode=yes" ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+    echo "$SSH_URL"
+  else
+    echo "$HTTPS_URL"
+  fi
+}
+REMOTE="$(pick_url)"
 
 echo "==> preparing $OWNER/$REPO"
 
@@ -198,28 +217,65 @@ jobs:
 YML
 sed -i.bak -e "s/OWNER-DOMAIN/$OWNER.top/g" -e "s/OWNER/$OWNER/g" -e "s/BUCKET_NAME/$BUCKET/g" "$WORK/.github-workflow-sign.yml" && rm -f "$WORK/.github-workflow-sign.yml.bak"
 
-if gh repo view "$OWNER/$REPO" >/dev/null 2>&1; then
-  echo "    repo exists, updating files"
-  git clone --depth 1 "https://github.com/$OWNER/$REPO" "$WORK/clone" 2>/dev/null || true
-  if [ -d "$WORK/clone" ]; then
-    cp -R "$WORK/profiles/." "$WORK/clone/profiles/" 2>/dev/null || mkdir -p "$WORK/clone/profiles" && cp "$WORK/profiles/"*.yaml "$WORK/clone/profiles/"
-    cp "$WORK/README.md" "$WORK/clone/README.md"
-    mkdir -p "$WORK/clone/.github/workflows"
-    mv "$WORK/.github-workflow-sign.yml" "$WORK/clone/.github/workflows/sign.yml"
-    ( cd "$WORK/clone" && git add -A && git diff --staged --quiet || \
-      git commit -m "chore: sync profiles from main repo" && git push ) || true
-  fi
+if repo_exists; then
+  echo "    repo exists, syncing files via $REMOTE"
+  git clone --depth 1 "$REMOTE" "$WORK/clone"
+  mkdir -p "$WORK/clone/profiles" "$WORK/clone/.github/workflows"
+  cp "$WORK/profiles/"*.yaml "$WORK/clone/profiles/"
+  cp "$WORK/README.md" "$WORK/clone/README.md"
+  mv "$WORK/.github-workflow-sign.yml" "$WORK/clone/.github/workflows/sign.yml"
+  (
+    cd "$WORK/clone"
+    git add -A
+    if git diff --staged --quiet; then
+      echo "    nothing to update"
+    else
+      git commit -qm "chore: sync profiles from main repo"
+      git push origin HEAD:main
+    fi
+  )
 else
-  echo "    creating repo"
-  gh repo create "$OWNER/$REPO" --public \
-    --description "Signed cloud firewall profiles for YukiTunnel" \
-    --disable-wiki
-  ( cd "$WORK" && git init -q . && mkdir -p .github/workflows \
-      && mv .github-workflow-sign.yml .github/workflows/sign.yml \
-      && git add -A && git commit -qm "feat: initial profile registry" \
-      && git branch -M main \
-      && git remote add origin "https://github.com/$OWNER/$REPO.git" \
-      && git push -u origin main )
+  echo "    repo does not exist yet"
+  if have_gh_auth; then
+    echo "    creating with gh"
+    gh repo create "$OWNER/$REPO" --public \
+      --description "Signed cloud firewall profiles for YukiTunnel" \
+      --disable-wiki >/dev/null
+  else
+    cat >&2 <<MANUAL
+
+────────────────────────────────────────────────────────────────
+需要你先手动创建空仓库（gh 未登录，且创建仓库必须走 API）：
+
+  1. 打开 https://github.com/new
+  2. Repository name: $REPO
+  3. Owner: $OWNER
+  4. 选 Public
+  5. **不要**勾选 "Add a README file" / .gitignore / license（必须是空仓库）
+  6. 点 Create repository
+  7. 回来重新执行本条命令
+
+或者先登录 gh，让脚本自动建：
+
+  gh auth login
+  bash scripts/init-profiles-repo.sh
+────────────────────────────────────────────────────────────────
+MANUAL
+    exit 1
+  fi
+
+  echo "    seeding via $REMOTE"
+  (
+    cd "$WORK"
+    git init -q .
+    mkdir -p .github/workflows
+    mv .github-workflow-sign.yml .github/workflows/sign.yml
+    git add -A
+    git commit -qm "feat: initial profile registry"
+    git branch -M main
+    git remote add origin "$REMOTE"
+    git push -u origin main
+  )
 fi
 
 echo

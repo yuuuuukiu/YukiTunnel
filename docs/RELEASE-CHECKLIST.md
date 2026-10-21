@@ -11,11 +11,11 @@ export VERSION=0.1.0
 
 ## 1. 签名密钥
 
-- [ ] `bash scripts/gen-profile-signing-key.sh` 生成 Ed25519 密钥对
-- [ ] 私钥已存入密码管理器，**未**提交（`git status` 无 `*.key`）
-- [ ] `internal/server/profilekeys.go` 的 `builtinProfileKeyB64` 已替换为公钥
-- [ ] `grep -n 'builtinProfileKeyB64 =' internal/server/profilekeys.go` 显示真实 base64
-- [ ] GitHub secret `PROFILE_SIGNING_KEY` 已设置（base64 的 PEM）
+- [x] `bash scripts/gen-profile-signing-key.sh` 生成 Ed25519 密钥对
+- [x] 私钥已存入密码管理器，**未**提交（`git status` 无 `*.key`）
+- [x] `internal/server/profilekeys.go` 的 `builtinProfileKeyB64` 已替换为公钥
+- [x] `grep -n 'builtinProfileKeyB64 =' internal/server/profilekeys.go` 显示真实 base64
+- [x] GitHub secret `PROFILE_SIGNING_KEY` 已设置（base64 的 PEM）
 - [ ] 发布守门生效：
 
 ```bash
@@ -29,13 +29,13 @@ YUKI_RELEASE=1 go test ./internal/server -run TestBuiltinKeyIsNotPlaceholder
 
 ## 2. Profile Registry
 
-- [ ] `go run ./cmd/yuki-profile-sign -dir profiles -key <key> -key-id yuki-profiles-2026` 成功
-- [ ] `profiles/index.json` 与 `index.json.sig` 已提交
-- [ ] 6 个 profile 的 `sha256` 与文件一致
-- [ ] R2 secrets 已配置：`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ENDPOINT`
-- [ ] R2 可访问：`curl -fsSL https://tunnel.yuuuuukiu.top/index.json | head -c 80`
-- [ ] 三个镜像字节一致（官方 / jsDelivr / raw）
-- [ ] 客户端验签通过：`./bin/yuki-server profile index` 显示「已验签」
+- [x] `go run ./cmd/yuki-profile-sign -dir profiles -key <key> -key-id yuki-profiles-2026` 成功
+- [x] `profiles/index.json` 与 `index.json.sig` 已提交
+- [x] 6 个 profile 的 `sha256` 与文件一致
+- [x] R2 secrets 已配置：`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ENDPOINT`
+- [x] R2 可访问：`curl -fsSL https://tunnel.yuuuuukiu.top/profiles/index.json` 返回 200，三源哈希一致（`cf24fe1f`）
+- [x] 三个镜像字节一致（官方 / jsDelivr / raw）
+- [x] 客户端验签通过：`./bin/yuki-server profile index` 显示「已验签」
 
 ---
 
@@ -43,11 +43,11 @@ YUKI_RELEASE=1 go test ./internal/server -run TestBuiltinKeyIsNotPlaceholder
 
 已统一为 `yuuuuukiu` 账号 + `tunnel.yuuuuukiu.top` 镜像域名。
 
-- [ ] 主仓库已存在：`https://github.com/yuuuuukiu/yukitunnel`
-- [ ] registry 仓库已建：`bash scripts/init-profiles-repo.sh`
-- [ ] `tunnel.yuuuuukiu.top` 已添加 DNS 记录（当前 NXDOMAIN）
-- [ ] jsDelivr / raw 能取到 `profiles/index.json`（404 说明仓库还没推送）
-- [ ] `./bin/yuki-server profile index` 能显示来源与「已验签」
+- [x] 主仓库已存在：`https://github.com/yuuuuukiu/yukitunnel`
+- [x] registry 仓库已建：`bash scripts/init-profiles-repo.sh`
+- [x] `tunnel.yuuuuukiu.top` 已解析（Cloudflare 代理，CNAME → `yuki-tunnel-profile.r2.cloudflarestorage.com`）
+- [x] jsDelivr / raw 能取到 `profiles/index.json`（404 说明仓库还没推送）
+- [x] `./bin/yuki-server profile index` 能显示来源与「已验签」
 - [ ] 若镜像尚未就绪：确认离线兜底可用（会显示 `builtin` 警告）
 
 > schema 标识 `yukitunnel.io/v1` 与数据目录 `/var/lib/yukitunnel/` 是稳定契约，
@@ -65,12 +65,12 @@ docker compose ps          # 必须 healthy
 curl -sk https://127.0.0.1:8443/api/v1/health
 ```
 
-- [ ] `docker compose up -d --build` 能直接从源码构建（不依赖已发布的镜像）
-- [ ] 构建 context 不含 `desktop/src-tauri/target`（否则会多传数 GB）
-- [ ] 容器 `healthy`，健康检查返回 `"status":"ok"`
-- [ ] WebUI 打开能看到登录页
-- [ ] 断网环境下 `yuki-server profile install <id>` 回退到内置副本并给出警告
-- [ ] 伪造签名的镜像**不会**触发回退（`PROFILE_INTEGRITY_FAILURE`）
+- [x] `docker compose up -d --build` 能直接从源码构建（不依赖已发布的镜像）
+- [x] 构建 context 不含 `desktop/src-tauri/target`（否则会多传数 GB）
+- [x] 容器 `healthy`，健康检查返回 `"status":"ok"`
+- [x] WebUI 打开能看到登录页
+- [x] 断网环境下 `yuki-server profile install <id>` 回退到内置副本并给出警告
+- [x] 伪造签名的镜像**不会**触发回退（`PROFILE_INTEGRITY_FAILURE`）
 
 ## 3. 代码质量
 
@@ -106,27 +106,27 @@ cd desktop/src-tauri && cargo check
 
 ## 5. 端到端真机
 
-- [ ] Linux 服务器 `docker compose up -d`，`healthy`
-- [ ] WebUI 可登录，能创建用户 / 节点 / 隧道
+- [x] Linux 服务器 `docker compose up -d`，`healthy`
+- [x] WebUI 可登录，能创建用户 / 节点 / 隧道
 - [ ] 客户端 GUI 首次向导完成登录
 - [ ] 客户端 GUI 点「+」看到节点延迟并创建隧道
-- [ ] 隧道启动后公网地址可从外部访问
-- [ ] 停止隧道后端口立即不可达
+- [x] 隧道启动后公网地址可从外部访问
+- [x] 停止隧道后端口立即不可达
 - [ ] 客户端断网 30 秒恢复后隧道自动重连
 - [x] macOS DMG 生成并实机启动（`YukiTunnel_0.1.0_aarch64.dmg`，15.45 MiB）
 - [ ] Windows `.exe` / Linux AppImage 安装包实机验证
 - [ ] 桌面端管理员登录后能看到「管理」分组（7 个页面）
-- [ ] 桌面端「部署服务端」向导完整跑通一次
+- [x] 桌面端「部署服务端」向导完整跑通一次
 
 ---
 
 ## 6. 系统防火墙
 
-- [ ] ufw（`Default: deny (incoming)`）：启动隧道后 `ufw status` 出现 `20000/tcp ... # yukitunnel`
-- [ ] ufw：停止隧道后规则消失
+- [x] ufw（`Default: deny (incoming)`）：启动隧道后 `ufw status` 出现 `20000/tcp ... # yukitunnel`
+- [x] ufw：停止隧道后规则消失
 - [ ] firewalld（target=DROP）：`firewall-cmd --list-ports` 出现端口
 - [ ] firewalld：停止后端口移除
-- [ ] nftables：`nft list chain inet yukitunnel input` 出现规则
+- [x] nftables：`nft list chain inet yukitunnel input` 出现规则
 - [ ] `yuki-server doctor` 的「系统防火墙」一行状态正确
 - [ ] 服务端重启后孤儿规则被清理（审计含 `firewall.reconciled`）
 

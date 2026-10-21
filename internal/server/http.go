@@ -283,6 +283,19 @@ func (h *httpServer) withMiddleware(next http.Handler) http.Handler {
 
 var loginBuckets sync.Map
 
+// resetLoginBuckets clears the per-IP login throttle.
+//
+// The buckets are process-global (they must be: the same client can hit any
+// request goroutine), which means every test in this package shares one
+// budget. Tests call this so a suite of dozens of logins does not trip the
+// limiter and produce confusing 429s.
+func resetLoginBuckets() {
+	loginBuckets.Range(func(k, _ any) bool {
+		loginBuckets.Delete(k)
+		return true
+	})
+}
+
 func (h *httpServer) loginAllowed(r *http.Request) bool {
 	ip := clientIP(r)
 	now := time.Now()

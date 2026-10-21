@@ -158,10 +158,13 @@ func (h *httpServer) handleAdminUpdateUser(w http.ResponseWriter, r *http.Reques
 		}
 		u.PasswordHash = hash
 	}
-	if u.Role != "admin" || u.Disabled {
-		if admins, err := h.svc.Store.CountAdmins(ctx); err == nil && admins <= 1 && u.Role != "admin" {
-			// last admin cannot be demoted (guarded above for self, this covers
-			// another admin demoting the only admin)
+	// Guard the last remaining admin only when this update actually removes an
+	// admin (demotion or disable). The previous condition also fired for plain
+	// users, so disabling any regular account failed with LAST_ADMIN.
+	wasAdmin := u.Role == "admin"
+	stillActiveAdmin := u.Role == "admin" && !u.Disabled
+	if wasAdmin && !stillActiveAdmin {
+		if admins, err := h.svc.Store.CountAdmins(ctx); err == nil && admins <= 1 {
 			writeError(w, apierr.BadRequest("LAST_ADMIN", "至少需要保留一个管理员账号"))
 			return
 		}

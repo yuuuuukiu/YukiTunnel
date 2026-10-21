@@ -171,6 +171,9 @@ func (s *testServer) do(t *testing.T, method, path, token string, body any, out 
 
 func (s *testServer) adminToken(t *testing.T) string {
 	t.Helper()
+	// The login throttle is process-global, so reset it before each login to
+	// keep the suite deterministic regardless of how many tests ran before.
+	resetLoginBuckets()
 	// The bootstrap admin uses the default password unless overridden.
 	var res struct {
 		Token string `json:"token"`

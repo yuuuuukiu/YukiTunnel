@@ -72,6 +72,13 @@ jobs:
             printf '#!/bin/sh\nexit 0\n' > "desktop/src-tauri/binaries/${b}-${triple}"
             chmod +x "desktop/src-tauri/binaries/${b}-${triple}"
           done
+      # desktop/ compiles ../web/src directly through the @web alias, so the
+      # web workspace's dependencies must be installed too: TypeScript resolves
+      # modules starting from the importing file (web/src/*), which never walks
+      # down into desktop/node_modules.
+      - name: Install web deps (desktop compiles web/src)
+        run: pnpm install --frozen-lockfile
+        working-directory: web
       - run: pnpm install --frozen-lockfile
         working-directory: desktop
       - run: pnpm build
@@ -110,12 +117,13 @@ jobs:
       - name: Build amd64 + 386
         shell: pwsh
         run: ./scripts/build-windows.ps1 -Arch all -Version ci
+      # build-windows.ps1 writes to dist\windows; keep the paths in sync.
       - name: Smoke test (amd64)
         shell: pwsh
-        run: ./scripts/smoke-windows.ps1 -BinDir bin/windows -Arch amd64
+        run: ./scripts/smoke-windows.ps1 -BinDir dist/windows -Arch amd64
       - name: Smoke test (x86)
         shell: pwsh
-        run: ./scripts/smoke-windows.ps1 -BinDir bin/windows -Arch 386
+        run: ./scripts/smoke-windows.ps1 -BinDir dist/windows -Arch 386
 
   docker:
     name: Docker image

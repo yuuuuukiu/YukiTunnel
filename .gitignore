@@ -41,6 +41,9 @@ admin.txt
 internal/server/webdist/*
 !internal/server/webdist/.keep
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 # editors / OS
 .DS_Store
 .idea/

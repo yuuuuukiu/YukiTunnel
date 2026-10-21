@@ -11,6 +11,7 @@
 | 5 | 客户端首次配置 + 密码/Key 登录 | `Connect.tsx`、`yuki login` | `TestKeyAuthFlow` | ✅ |
 | 6 | 点「+」看到延迟并创建隧道 | `CreateTunnelModal.tsx` | 截图 + `POST /tunnels` | ✅ |
 | 7 | 返回正确的公网地址形式 | `Service.PublicAddress` | `TestAdminCreatesUserAndTunnel`（域名）、`TestDomainBindingToggle`（IP） | ✅ |
+| 7b | TCP / UDP / HTTP / HTTPS 四种协议 | `internal/tunnel/hub.go` | `TestTCPTunnelRoundTrip`、`TestUDPTunnel`、`TestHTTPTunnel`、`TestHTTPSTunnelPassthrough`、`TestHTTPSTunnelCarriesRealTLS` | ✅ |
 | 8 | 启动生效、停止失效 | `Hub.StartTunnelFor` / `Hub.StopTunnel` | `internal/tunnel` 集成测试 + e2e | ✅ |
 | 9 | CLI 覆盖 GUI 核心流程并支持 `--json` | `internal/cli` | `scripts/e2e-local.sh` | ✅ |
 | 10 | 云 Profile 安装/执行/回收 | `internal/cloudprofile` | 见 [ACCEPTANCE-PROFILES.md](ACCEPTANCE-PROFILES.md) | ✅ |

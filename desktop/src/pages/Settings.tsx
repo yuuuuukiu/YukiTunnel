@@ -38,10 +38,10 @@ export default function SettingsPage() {
         <Card>
           <CardHeader title="本地文件" subtitle="用于排查问题或迁移数据" />
           <dl className="kv">
-            <dt>配置目录</dt><dd className="mono small">{paths?.config_dir ?? '—'}</dd>
-            <dt>默认数据目录</dt><dd className="mono small">{paths?.data_dir ?? '—'}</dd>
-            <dt>服务端组件</dt><dd className="mono small">{paths?.server_binary ?? '未找到'}</dd>
-            <dt>客户端组件</dt><dd className="mono small">{paths?.client_binary ?? '未找到'}</dd>
+            <dt>配置目录</dt><dd className="mono small"><PathText value={paths?.config_dir} /></dd>
+            <dt>默认数据目录</dt><dd className="mono small"><PathText value={paths?.data_dir} /></dd>
+            <dt>服务端组件</dt><dd className="mono small"><PathText value={paths?.server_binary} fallback="未找到" /></dd>
+            <dt>客户端组件</dt><dd className="mono small"><PathText value={paths?.client_binary} fallback="未找到" /></dd>
           </dl>
         </Card>
       </div>
@@ -54,6 +54,33 @@ export default function SettingsPage() {
           </div>
         </Card>
       )}
+    </>
+  );
+}
+
+/**
+ * PathText renders a filesystem path so it wraps at separators.
+ *
+ * Browsers only break at spaces and hyphens, so an absolute path either
+ * overflows the card or gets split mid-word ("yuki-serv/er"). Inserting a
+ * zero-width space after each separator gives the layout engine a sane place
+ * to break without changing what is copied out.
+ */
+function PathText({ value, fallback = '—' }: { value?: string | null; fallback?: string }) {
+  if (!value) return <>{fallback}</>;
+  const parts = value.split('/');
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 && (
+            <>
+              /<wbr />
+            </>
+          )}
+        </span>
+      ))}
     </>
   );
 }

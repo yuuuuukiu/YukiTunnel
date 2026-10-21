@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
-  Activity, Boxes, Cloud, FileClock, Globe2, Rocket, ServerCog,
+  Activity, Boxes, Cloud, FileClock, Globe2, LogOut, Rocket, ServerCog,
   Settings, ShieldCheck, Users,
 } from 'lucide-react';
 import { useAuth } from '@web/state/auth';
@@ -25,7 +25,7 @@ const adminNav = [
 ];
 
 export default function DesktopLayout() {
-  const { user, serverUrl } = useAuth();
+  const { user, serverUrl, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
 
   return (
@@ -61,17 +61,28 @@ export default function DesktopLayout() {
         )}
 
         <div className="sidebar-footer">
-          <div className="row gap-8" style={{ padding: '0 8px 10px' }}>
-            <ShieldCheck size={16} className="faint" />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                {user?.username}
-                {isAdmin && <Badge tone="info">管理员</Badge>}
-              </div>
-              <div className="faint small" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {serverUrl}
+          <div className="row gap-8 space-between" style={{ padding: '0 8px 10px', alignItems: 'center' }}>
+            <div className="row gap-8" style={{ minWidth: 0, flex: 1, alignItems: 'center' }}>
+              <ShieldCheck size={16} className="faint" style={{ flexShrink: 0 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {user?.username}
+                  {isAdmin && <Badge tone="info">管理员</Badge>}
+                </div>
+                <div className="faint small" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={serverUrl ?? ''}>
+                  {serverUrl}
+                </div>
               </div>
             </div>
+            <button
+              type="button"
+              className="icon-btn"
+              title="断开并切换服务端"
+              onClick={() => void logout()}
+              style={{ flexShrink: 0, padding: 4 }}
+            >
+              <LogOut size={15} />
+            </button>
           </div>
         </div>
       </aside>

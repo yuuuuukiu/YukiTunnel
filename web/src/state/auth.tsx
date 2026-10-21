@@ -11,6 +11,7 @@ interface AuthState {
   setServerUrl: (url: string | null) => void;
   login: (username: string, password: string) => Promise<void>;
   loginWithKey: (username: string, privateKeyPem: string) => Promise<void>;
+  loginWithToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -177,6 +178,22 @@ export function AuthProvider({ children, initialServerUrl = null }: { children: 
     [applySession],
   );
 
+  const loginWithToken = useCallback(
+    async (rawToken: string) => {
+      const cleanToken = rawToken.trim();
+      if (!cleanToken) throw new Error('请输入 API Token');
+      configureApi({ token: cleanToken });
+      try {
+        const res = await api.me();
+        applySession({ token: cleanToken, user: res.user });
+      } catch (err) {
+        configureApi({ token: null });
+        throw err;
+      }
+    },
+    [applySession],
+  );
+
   const logout = useCallback(async () => {
     try {
       if (currentToken()) await api.logout();
@@ -194,8 +211,8 @@ export function AuthProvider({ children, initialServerUrl = null }: { children: 
   }, [persist]);
 
   const value = useMemo(
-    () => ({ user, token, loading, serverUrl, setServerUrl, login, loginWithKey, logout, refresh }),
-    [user, token, loading, serverUrl, setServerUrl, login, loginWithKey, logout, refresh],
+    () => ({ user, token, loading, serverUrl, setServerUrl, login, loginWithKey, loginWithToken, logout, refresh }),
+    [user, token, loading, serverUrl, setServerUrl, login, loginWithKey, loginWithToken, logout, refresh],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

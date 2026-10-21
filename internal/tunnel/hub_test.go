@@ -3,6 +3,7 @@ package tunnel
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"io"
 	"log/slog"
@@ -22,6 +23,19 @@ import (
 
 // fakeAgent dials the hub, registers tunnels and echoes local traffic.
 func fakeAgent(t *testing.T, hubURL, token string, specs []TunnelSpec, echo bool) *yamux.Session {
+	t.Helper()
+	return fakeAgentOpts(t, hubURL, token, specs, echo, false)
+}
+
+// fakeAgentForward makes the agent dial each tunnel's LocalIP:LocalPort and
+// splice bytes, which is what the real client does. Needed whenever the test
+// cares about the local service's own protocol (e.g. TLS termination).
+func fakeAgentForward(t *testing.T, hubURL, token string, specs []TunnelSpec) *yamux.Session {
+	t.Helper()
+	return fakeAgentOpts(t, hubURL, token, specs, false, true)
+}
+
+func fakeAgentOpts(t *testing.T, hubURL, token string, specs []TunnelSpec, echo, forward bool) *yamux.Session {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(hubURL, "http") + "/v1/control"
 	hdr := http.Header{}
@@ -98,6 +112,21 @@ func fakeAgent(t *testing.T, hubURL, token string, specs []TunnelSpec, echo bool
 						}
 						_ = WriteDatagram(st, pkt)
 					}
+				}
+				if forward {
+					local, err := net.DialTimeout("tcp", net.JoinHostPort(h.LocalIP, strconv.Itoa(h.LocalPort)), 2*time.Second)
+					if err != nil {
+						return
+					}
+					defer local.Close()
+					done := make(chan struct{}, 1)
+					go func() {
+						_, _ = io.Copy(local, rb)
+						done <- struct{}{}
+					}()
+					_, _ = io.Copy(st, local)
+					<-done
+					return
 				}
 				_, _ = io.Copy(st, rb)
 			}()
@@ -224,5 +253,74 @@ func TestUnauthorizedControl(t *testing.T) {
 	}
 	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %v", resp)
+	}
+}
+
+// TestHTTPSTunnelPassthrough covers the one protocol with no test: "https" is a
+// raw TLS passthrough, so the server must not terminate or inspect TLS. The
+// byte stream is forwarded verbatim and the local service owns the certificate.
+func TestHTTPSTunnelPassthrough(t *testing.T) {
+	port := freePort(t)
+	specs := map[string]TunnelSpec{"s1": {ID: "s1", Proto: "https", PublicPort: port, BindAddr: "127.0.0.1", PublicHost: "127.0.0.1"}}
+	_, srv := newTestHub(t, specs)
+	_ = fakeAgent(t, srv.URL, "good", []TunnelSpec{specs["s1"]}, true)
+	time.Sleep(100 * time.Millisecond)
+
+	// A real TLS client handshake proves the tunnel carries raw bytes: the
+	// fake agent echoes, so the ClientHello round-trips and the server sees a
+	// TLS alert back. Success here means no TLS termination happened upstream.
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	clientHello := []byte{0x16, 0x03, 0x01, 0x00, 0x05, 0x01, 0x00, 0x00, 0x01, 0x00}
+	if _, err := conn.Write(clientHello); err != nil {
+		t.Fatalf("write client hello: %v", err)
+	}
+	buf := make([]byte, len(clientHello))
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read echo: %v", err)
+	}
+	if string(buf) != string(clientHello) {
+		t.Fatalf("TLS bytes were altered: got %x want %x", buf, clientHello)
+	}
+}
+
+// TestHTTPSTunnelCarriesRealTLS runs a genuine TLS handshake through the tunnel
+// against a local TLS server, proving end-to-end encryption survives.
+func TestHTTPSTunnelCarriesRealTLS(t *testing.T) {
+	local := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("secure-ok"))
+	}))
+	defer local.Close()
+	localPort := local.Listener.Addr().(*net.TCPAddr).Port
+
+	port := freePort(t)
+	spec := TunnelSpec{
+		ID: "s2", Proto: "https", PublicPort: port, BindAddr: "127.0.0.1",
+		PublicHost: "127.0.0.1", LocalIP: "127.0.0.1", LocalPort: localPort,
+	}
+	_, srv := newTestHub(t, map[string]TunnelSpec{"s2": spec})
+	_ = fakeAgentForward(t, srv.URL, "good", []TunnelSpec{spec})
+	time.Sleep(150 * time.Millisecond)
+
+	// Trust the local server's self-signed cert; the tunnel must not rewrite it.
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	resp, err := client.Get("https://127.0.0.1:" + strconv.Itoa(port) + "/")
+	if err != nil {
+		t.Fatalf("https through tunnel: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "secure-ok" {
+		t.Fatalf("unexpected body %q", body)
 	}
 }

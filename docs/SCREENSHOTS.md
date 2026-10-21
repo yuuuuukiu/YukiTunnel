@@ -19,6 +19,11 @@
 | `desktop-deploy-admin.png` | 一键部署向导（TLS / 管理员） |
 | `desktop-deploy-confirm.png` | 一键部署向导（确认配置 / 进度） |
 
+> 桌面端的管理页与 WebUI 共用同一批组件（`desktop/src/pages/admin/*` 只是
+> 再导出 `@web/pages/admin/*`），因此侧边栏之外没有独立的视觉差异。管理员登录后
+> 左侧会多出「管理」分组（管理概览 / 用户 / 节点 / 隧道 / 域名与端口 / 云 Profile /
+> 审计日志），对应的文档截图复用上面 WebUI 那几张。
+
 以下为各界面应展示的关键信息，便于后续更新截图。
 
 ## 1. 登录页（WebUI）

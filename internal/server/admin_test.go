@@ -243,3 +243,98 @@ func TestLastAdminCannotBeRemoved(t *testing.T) {
 		}
 	}
 }
+
+// TestAdminTunnelLifecycle covers the tunnel controls the admin console exposes:
+// list, disable, enable, delete.
+func TestAdminTunnelLifecycle(t *testing.T) {
+	s := newTestServer(t)
+	admin := s.adminToken(t)
+
+	var nodes struct {
+		Nodes []struct {
+			ID string `json:"id"`
+		} `json:"nodes"`
+	}
+	if code := s.do(t, "GET", "/admin/nodes", admin, nil, &nodes); code != 200 || len(nodes.Nodes) == 0 {
+		t.Fatalf("need at least one node: %d", code)
+	}
+	nodeID := nodes.Nodes[0].ID
+
+	_ = s.do(t, "POST", "/admin/users", admin, map[string]any{
+		"username": "frank", "password": "frank12345", "role": "user",
+	}, nil)
+	var login struct {
+		Token string `json:"token"`
+	}
+	if code := s.do(t, "POST", "/auth/login", "", map[string]string{
+		"username": "frank", "password": "frank12345",
+	}, &login); code != 200 {
+		t.Fatalf("user login: %d", code)
+	}
+
+	var created struct {
+		Tunnel struct {
+			ID string `json:"id"`
+		} `json:"tunnel"`
+	}
+	if code := s.do(t, "POST", "/tunnels", login.Token, map[string]any{
+		"node_id": nodeID, "proto": "tcp", "local_ip": "127.0.0.1", "local_port": 8080,
+	}, &created); code != 201 {
+		t.Fatalf("create tunnel: %d", code)
+	}
+	id := created.Tunnel.ID
+
+	var list struct {
+		Tunnels []struct {
+			ID string `json:"id"`
+		} `json:"tunnels"`
+	}
+	if code := s.do(t, "GET", "/admin/tunnels", admin, nil, &list); code != 200 {
+		t.Fatalf("admin list tunnels: %d", code)
+	}
+	found := false
+	for _, tt := range list.Tunnels {
+		if tt.ID == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tunnel %s missing from admin list", id)
+	}
+
+	for _, op := range []struct{ path, method string }{
+		{"/admin/tunnels/" + id + "/disable", "POST"},
+		{"/admin/tunnels/" + id + "/enable", "POST"},
+	} {
+		if code := s.do(t, op.method, op.path, admin, nil, nil); code != 200 {
+			t.Fatalf("%s: %d", op.path, code)
+		}
+	}
+
+	if code := s.do(t, "DELETE", "/admin/tunnels/"+id, admin, nil, nil); code != 200 && code != 204 {
+		t.Fatalf("delete tunnel: %d", code)
+	}
+}
+
+// TestTunnelCreateRequiresNode documents that omitting node_id is a client
+// error with a clear code, not a 500.
+func TestTunnelCreateRequiresNode(t *testing.T) {
+	s := newTestServer(t)
+	admin := s.adminToken(t)
+	_ = s.do(t, "POST", "/admin/users", admin, map[string]any{
+		"username": "gina", "password": "gina12345", "role": "user",
+	}, nil)
+	var login struct {
+		Token string `json:"token"`
+	}
+	_ = s.do(t, "POST", "/auth/login", "", map[string]string{
+		"username": "gina", "password": "gina12345",
+	}, &login)
+
+	body := s.doRaw(t, "POST", "/tunnels", login.Token, map[string]any{
+		"proto": "tcp", "local_ip": "127.0.0.1", "local_port": 8080,
+	})
+	if !strings.Contains(body, "NODE_REQUIRED") {
+		t.Fatalf("expected NODE_REQUIRED, got %s", body)
+	}
+}

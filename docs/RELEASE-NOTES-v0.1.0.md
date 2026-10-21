@@ -60,16 +60,27 @@
 
 | 厂商 | 状态 | 说明 |
 | --- | --- | --- |
-| **阿里云** | ✅ 真实账号联调通过 | 签名、放行、幂等、回收、错误码全部验证 |
-| **腾讯云** | ✅ 真实账号联调通过 | 同上，含 envelope 与大写协议 |
-| AWS | ⚠️ 仅 mock 验证 | 请求形状与 SigV4 头已验证，未跑真实账号 |
-| 华为云 | ⚠️ 仅 mock 验证 | 请求体与 Token 头已验证，未跑真实账号 |
-| Azure | ⚠️ 仅 mock 验证 | PUT 语义与端口格式已验证，未跑真实账号 |
-| GCP | ⚠️ 仅 mock 验证 | ports 数组与 INGRESS 已验证，未跑真实账号 |
+| 阿里云 | ⚠️ 仅 mock 验证 | 请求形状、`Action` 参数、HMAC-SHA1 签名、斜杠端口格式已验证；**未跑真实账号** |
+| 腾讯云 | ⚠️ 仅 mock 验证 | TC3 签名、`SecurityGroupPolicySet` envelope、大写协议已验证；**未跑真实账号** |
+| AWS | ⚠️ 仅 mock 验证 | 请求形状与 SigV4 头已验证 |
+| 华为云 | ⚠️ 仅 mock 验证 | 请求体与 IAM Token 头已验证 |
+| Azure | ⚠️ 仅 mock 验证 | PUT 语义与端口格式已验证 |
+| GCP | ⚠️ 仅 mock 验证 | `ports` 数组与 `INGRESS` 已验证 |
 
-> 「mock 验证」= 用本地 HTTPS 端点断言请求体、签名头、端口格式、协议大小写。
-> 这能保证请求结构正确，但不能保证云厂商一定接受（限流、账号策略等）。
-> 未验证的厂商请先用 `scripts/live-test-*.sh` 或 `yuki-live-test` 自测。
+> **没有任何厂商经过真实账号联调。** 全部 6 个 profile 只通过 mock 端点验证了
+> 请求结构、签名算法、端口方言与协议大小写。
+>
+> 这能保证「请求长得对」，但**不能保证云厂商一定接受**——限流、子账号策略、
+> 账号状态、地域差异都可能导致真实调用失败。
+>
+> 发布前请自行联调：
+>
+> ```bash
+> export YUKI_ALIYUN_ACCESS_KEY_ID=...   # 最小权限子账号
+> bash scripts/live-test-aliyun.sh
+> ```
+>
+> 步骤与最小权限策略见 [CLOUD-LIVE-TEST.md](CLOUD-LIVE-TEST.md)。
 
 ---
 

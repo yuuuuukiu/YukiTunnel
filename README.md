@@ -146,12 +146,15 @@ GitHub: yuuuuukiu/yukitunnel-profiles
 
 | 厂商 | 端口写法 | 协议大小写 | 签名 | 状态 |
 | --- | --- | --- | --- | --- |
-| 阿里云 | `8000/8010` | `tcp` | HMAC-SHA1 | ✅ 真实联调 |
-| 腾讯云 | `8000-8010` | `TCP` | TC3-HMAC-SHA256 | ✅ 真实联调 |
+| 阿里云 | `8000/8010` | `tcp` | HMAC-SHA1 | ⚠️ mock |
+| 腾讯云 | `8000-8010` | `TCP` | TC3-HMAC-SHA256 | ⚠️ mock |
 | AWS | `FromPort`/`ToPort` | `tcp` | SigV4 | ⚠️ mock |
 | 华为云 | `port_range_min/max` | `tcp` | IAM Token | ⚠️ mock |
 | Azure | `"8000-8010"` | `Tcp` | OAuth2 | ⚠️ mock |
 | GCP | `["8000-8010"]` | `tcp` | OAuth2 | ⚠️ mock |
+
+> ⚠️ mock = 只用本地 HTTPS 端点验证了请求结构、签名与端口方言，**尚未用真实账号联调**。
+> 上线前请按 [docs/CLOUD-LIVE-TEST.md](docs/CLOUD-LIVE-TEST.md) 自测。
 
 - 签名校验**无法关闭**，缓存也验签
 - `allowed_hosts` 白名单阻止凭证外发

@@ -1,0 +1,116 @@
+# Azure 网络安全组（NSG）—— 官方维护 profile
+#
+# 依据：Azure REST API Virtual Networks - Security Rules Create Or Update
+#       （api-version 2026-01-01）。
+# 关键差异：PUT 按规则名创建/覆盖（天然幂等）；priority 100-4096 必填且唯一；
+#          协议首字母大写 Tcp/Udp；端口为字符串 "80" 或 "8000-8010"；
+#          鉴权是 OAuth2 Bearer Token，无请求级签名。
+apiVersion: yukitunnel.io/v1
+kind: CloudProfile
+metadata:
+  id: azure-nsg
+  name: Azure 网络安全组
+  vendor: azure
+  version: 1.0.0
+  maintainer: yukitunnel
+  min_engine: 0.2.0
+  description: |
+    以 PUT 语义创建或更新 NSG 规则：同名规则会被覆盖，因此重复执行天然幂等。
+    删除按规则名进行。
+  docs:
+    - https://learn.microsoft.com/en-us/rest/api/virtualnetwork/security-rules/create-or-update
+
+spec:
+  auth:
+    engine: azure-oauth2
+    credential_fields: [access_token, subscription_id, resource_group]
+    service: management
+    version: "2026-01-01"
+
+  endpoint:
+    template: >-
+      https://management.azure.com/subscriptions/{{ .subscription_id }}/resourceGroups/{{ .resource_group }}/providers/Microsoft.Network/networkSecurityGroups/{{ .nsg_name }}/securityRules/{{ .rule_name }}?api-version=2026-01-01
+    method: PUT
+    content_type: application/json
+
+  allowed_hosts:
+    - "management.azure.com"
+
+  permissions:
+    - "Microsoft.Network/networkSecurityGroups/securityRules/write"
+    - "Microsoft.Network/networkSecurityGroups/securityRules/delete"
+    - "Microsoft.Network/networkSecurityGroups/securityRules/read"
+
+  parameters:
+    - name: subscription_id
+      label: 订阅 ID
+      required: true
+    - name: resource_group
+      label: 资源组
+      required: true
+    - name: nsg_name
+      label: NSG 名称
+      required: true
+    - name: rule_name
+      label: 规则名称
+      default: YukiTunnel-20000-20100
+      description: 同名规则会被覆盖，请保持稳定
+    - name: source_cidr
+      label: 允许的来源网段
+      default: "0.0.0.0/0"
+    - name: port_min
+      label: 起始端口
+      required: true
+    - name: port_max
+      label: 结束端口
+      required: true
+    - name: protocol
+      label: 协议
+      default: Tcp
+      enum: [Tcp, Udp, "*"]
+    - name: priority
+      label: 优先级
+      default: "1000"
+      description: 100-4096，同一 NSG 内必须唯一，数值越小优先级越高
+
+  revoke_policy:
+    by: rule_name
+    name_template: "{{ .rule_name }}"
+
+  rate_limit_per_minute: 60
+
+  actions:
+    ensure_port_allowed:
+      operation: SecurityRules_CreateOrUpdate
+      params:
+        properties:
+          access: Allow
+          direction: Inbound
+          priority: "{{ .priority }}"
+          # Azure 特有：协议首字母大写
+          protocol: '{{ proto "title" .protocol }}'
+          sourceAddressPrefix: "{{ .source_cidr }}"
+          sourcePortRange: "*"
+          destinationAddressPrefix: "*"
+          # Azure 特有：端口是字符串 "80" 或 "8000-8010"
+          destinationPortRange: '{{ port_range "dash" .port_min .port_max }}'
+          description: "YukiTunnel managed rule"
+      # PUT 天然幂等：不需要额外的读接口
+      idempotent_check:
+        operation: SecurityRules_Get
+        params: {}
+        match:
+          path: "properties"
+          compare: exact
+          fields:
+            destinationPortRange: '{{ port_range "dash" .port_min .port_max }}'
+            access: Allow
+      success_when:
+        status: 200
+
+    revoke_port_allowed:
+      operation: SecurityRules_Delete
+      params: {}
+      success_when:
+        status: 200
+        duplicate_codes: ["NotFound"]

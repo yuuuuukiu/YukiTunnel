@@ -1,0 +1,60 @@
+# YukiTunnel — one-command server deployment.
+#
+#   cp .env.example .env && edit .env
+#   docker compose up -d
+#
+# WebUI: https://<host>:8443  (self-signed certificate on first run)
+name: yukitunnel
+
+services:
+  yuki-server:
+    # Local build is the default so a fresh clone works before the first image
+    # is published. Set YUKI_IMAGE to a registry tag to pull instead.
+    image: ${YUKI_IMAGE:-yukitunnel/server:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${YUKI_VERSION:-0.1.0}
+    container_name: yuki-server
+    restart: unless-stopped
+    env_file:
+      # Optional: `docker compose up -d` also works without a .env file and
+      # falls back to the defaults below.
+      - path: .env
+        required: false
+    environment:
+      YUKI_DATA_DIR: /data
+      YUKI_API_ADDR: 0.0.0.0:8443
+      YUKI_CONTROL_ADDR: 0.0.0.0:9443
+      YUKI_PUBLIC_HOST: ${YUKI_PUBLIC_HOST:-}
+      YUKI_ADMIN_USERNAME: ${YUKI_ADMIN_USERNAME:-admin}
+      YUKI_ADMIN_PASSWORD: ${YUKI_ADMIN_PASSWORD:-}
+      YUKI_DOMAIN_BINDING: ${YUKI_DOMAIN_BINDING:-false}
+      YUKI_DOMAIN_SUFFIX: ${YUKI_DOMAIN_SUFFIX:-}
+      YUKI_PORT_MIN: ${YUKI_PORT_MIN:-20000}
+      YUKI_PORT_MAX: ${YUKI_PORT_MAX:-20100}
+      YUKI_TOKEN_TTL_HOURS: ${YUKI_TOKEN_TTL_HOURS:-168}
+      YUKI_LOG_LEVEL: ${YUKI_LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${API_PORT:-8443}:8443"
+      - "${CONTROL_PORT:-9443}:9443"
+      - "${PORT_RANGE_START:-20000}-${PORT_RANGE_END:-20100}:${PORT_RANGE_START:-20000}-${PORT_RANGE_END:-20100}"
+    volumes:
+      - yuki-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://127.0.0.1:8443/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  yuki-data:
+    name: yuki-data

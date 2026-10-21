@@ -1,0 +1,93 @@
+name: Profile Registry
+
+# Lives in the yuuuuukiu/yukitunnel-profiles repository in production. Kept here so the
+# signing pipeline is versioned with the code that verifies it.
+on:
+  push:
+    paths: ['profiles/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sign:
+    name: Validate and sign profiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+
+      - name: Restore signing key
+        env:
+          PROFILE_SIGNING_KEY: ${{ secrets.PROFILE_SIGNING_KEY }}
+        run: |
+          if [ -z "$PROFILE_SIGNING_KEY" ]; then
+            echo "::error::PROFILE_SIGNING_KEY secret is not set"; exit 1
+          fi
+          printf '%s' "$PROFILE_SIGNING_KEY" | base64 -d > profile-signing.key
+          chmod 600 profile-signing.key
+
+      - name: Validate every profile
+        run: |
+          go run ./cmd/yuki-profile-sign -dir profiles \
+            -key profile-signing.key -key-id "${{ vars.PROFILE_KEY_ID || 'yuki-profiles-2026' }}"
+
+      - name: Verify the index we just produced
+        run: |
+          go test ./internal/cloudprofile/... -run 'TestOfficialProfiles|TestValidate' -v
+
+      - name: Commit signed index
+        run: |
+          git config user.name  "yukitunnel-bot"
+          git config user.email "bot@yuuuuukiu.top"
+          git add profiles/index.json profiles/index.json.sig
+          git diff --staged --quiet || git commit -m "chore(profiles): regenerate signed index"
+
+      - name: Publish to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET || 'yukitunnel-profiles' }}
+        run: |
+          # The mirror is a byte-for-byte copy of profiles/; clients verify the
+          # ed25519 signature regardless of which mirror served the bytes.
+          for f in profiles/*.yaml profiles/index.json profiles/index.json.sig; do
+            aws s3 cp "$f" "s3://$R2_BUCKET/$(basename "$f")" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --content-type "$(case "$f" in *.json|*.sig) echo application/json;; *) echo application/yaml;; esac)" \
+              --cache-control "public, max-age=300"
+          done
+
+      - name: Push
+        run: git push
+
+  mirror-check:
+    name: Verify the public mirrors agree
+    needs: sign
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - name: Compare official, jsDelivr and raw
+        run: |
+          set -e
+          official="https://tunnel.yuuuuukiu.top"
+          jsdelivr="https://cdn.jsdelivr.net/gh/yuuuuukiu/yukitunnel-profiles@main"
+          raw="https://raw.githubusercontent.com/yuuuuukiu/yukitunnel-profiles/main"
+          for base in "$official" "$jsdelivr" "$raw"; do
+            echo "== $base"
+            curl -fsSL "$base/index.json" | sha256sum
+            curl -fsSL "$base/index.json.sig" | sha256sum
+          done
+          # All three must serve identical bytes, otherwise a client could pin a
+          # stale index depending on which mirror answered first.
+          a=$(curl -fsSL "$official/index.json" | sha256sum | cut -d' ' -f1)
+          b=$(curl -fsSL "$jsdelivr/index.json" | sha256sum | cut -d' ' -f1)
+          c=$(curl -fsSL "$raw/index.json" | sha256sum | cut -d' ' -f1)
+          if [ "$a" != "$b" ] || [ "$a" != "$c" ]; then
+            echo "::error::mirrors disagree (official=$a jsdelivr=$b raw=$c)"; exit 1
+          fi
+          echo "mirrors agree"

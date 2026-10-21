@@ -1,0 +1,113 @@
+# Google Cloud VPC 防火墙 —— 官方维护 profile
+#
+# 依据：Compute Engine API firewalls.insert / firewalls.delete / firewalls.get。
+# 关键差异：allowed[].IPProtocol + allowed[].ports[]（字符串数组）；
+#          direction=INGRESS；规则按 name 全局唯一；
+#          鉴权是 Service Account OAuth2 Bearer Token。
+apiVersion: yukitunnel.io/v1
+kind: CloudProfile
+metadata:
+  id: gcp-firewall
+  name: Google Cloud VPC 防火墙
+  vendor: gcp
+  version: 1.0.0
+  maintainer: yukitunnel
+  min_engine: 0.2.0
+  description: |
+    创建 INGRESS 防火墙规则。GCP 规则以 name 唯一，重复 insert 返回
+    alreadyExists（按成功处理），删除按 name 进行。
+  docs:
+    - https://cloud.google.com/compute/docs/reference/rest/v1/firewalls/insert
+
+spec:
+  auth:
+    engine: gcp-oauth2
+    credential_fields: [access_token, project]
+    service: compute
+    version: v1
+
+  endpoint:
+    template: "https://compute.googleapis.com/compute/v1/projects/{{ .project }}/global/firewalls"
+    method: POST
+    content_type: application/json
+
+  allowed_hosts:
+    - "compute.googleapis.com"
+
+  permissions:
+    - "compute.firewalls.create"
+    - "compute.firewalls.delete"
+    - "compute.firewalls.get"
+
+  parameters:
+    - name: project
+      label: 项目 ID
+      required: true
+    - name: rule_name
+      label: 规则名称
+      default: yukitunnel-20000-20100
+      description: GCP 防火墙规则名全局唯一，建议按端口段命名
+    - name: network
+      label: 网络
+      default: default
+    - name: source_cidr
+      label: 允许的来源网段
+      default: "0.0.0.0/0"
+    - name: port_min
+      label: 起始端口
+      required: true
+    - name: port_max
+      label: 结束端口
+      required: true
+    - name: protocol
+      label: 协议
+      default: tcp
+      enum: [tcp, udp]
+    - name: target_tags
+      label: 目标标签
+      default: "yukitunnel"
+      description: 仅对带该网络标签的实例生效
+
+  revoke_policy:
+    by: rule_name
+    name_template: "{{ .rule_name }}"
+
+  rate_limit_per_minute: 60
+
+  actions:
+    ensure_port_allowed:
+      operation: firewalls.insert
+      params:
+        name: "{{ .rule_name }}"
+        network: "projects/{{ .project }}/global/networks/{{ .network }}"
+        direction: INGRESS
+        priority: "1000"
+        sourceRanges:
+          - "{{ .source_cidr }}"
+        targetTags:
+          - "{{ .target_tags }}"
+        allowed:
+          - IPProtocol: '{{ proto "lower" .protocol }}'
+            # GCP 特有：端口是字符串数组
+            ports:
+              - '{{ port_range "string" .port_min .port_max }}'
+        description: "YukiTunnel managed rule"
+      idempotent_check:
+        operation: firewalls.get
+        params: {}
+        match:
+          path: "allowed"
+          compare: port_range
+          fields:
+            IPProtocol: '{{ proto "lower" .protocol }}'
+      success_when:
+        status: 200
+        duplicate_codes: ["alreadyExists"]
+
+    revoke_port_allowed:
+      operation: firewalls.delete
+      params:
+        firewall: "{{ .rule_name }}"
+      success_when:
+        status: 200
+        duplicate_codes: ["notFound"]

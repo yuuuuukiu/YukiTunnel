@@ -1,0 +1,33 @@
+[package]
+name = "yukitunnel-desktop"
+version = "0.1.0"
+description = "YukiTunnel desktop client and server console"
+authors = ["YukiTunnel contributors"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "yukitunnel_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+# Tauri decides between dev (devUrl) and production (embedded assets) builds by
+# this feature. `tauri build` enables it automatically; a plain `cargo build
+# --release` does not, which would ship a binary pointing at localhost:1420.
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "sync", "time", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+anyhow = "1"
+dirs = "5"
+portpicker = "0.1"

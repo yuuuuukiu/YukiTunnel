@@ -1,0 +1,123 @@
+# 腾讯云 VPC 安全组 —— 官方维护 profile
+#
+# 依据：腾讯云 VPC CreateSecurityGroupPolicies / DeleteSecurityGroupPolicies /
+#       DescribeSecurityGroupPolicies（API Version 2017-03-12，TC3 签名）。
+# 关键差异：端口用连字符 "起始-结束"；协议必须大写；签名 TC3-HMAC-SHA256；
+#          规则按 PolicyIndex 定位，删除时可用完整五元组匹配。
+apiVersion: yukitunnel.io/v1
+kind: CloudProfile
+metadata:
+  id: tencent-vpc-security-group
+  name: 腾讯云 VPC 安全组
+  vendor: tencent
+  version: 1.0.0
+  maintainer: yukitunnel
+  min_engine: 0.2.0
+  description: |
+    通过 CreateSecurityGroupPolicies 在安全组入方向追加放行规则，
+    执行前用 DescribeSecurityGroupPolicies 做幂等检查，
+    回收时用 DeleteSecurityGroupPolicies 按完整规则删除。
+  docs:
+    - https://cloud.tencent.com/document/api/215/15807
+    - https://cloud.tencent.com/document/api/215/15809
+    - https://cloud.tencent.com/document/api/215/15804
+
+spec:
+  auth:
+    engine: tencent-hmac-sha256
+    credential_fields: [secret_id, secret_key, region]
+    service: vpc
+    version: "2017-03-12"
+
+  endpoint:
+    template: "https://vpc.tencentcloudapi.com/"
+    method: POST
+    content_type: application/json; charset=utf-8
+
+  allowed_hosts:
+    - "vpc.tencentcloudapi.com"
+
+  permissions:
+    - "vpc:DescribeSecurityGroupPolicies"
+    - "vpc:CreateSecurityGroupPolicies"
+    - "vpc:DeleteSecurityGroupPolicies"
+
+  parameters:
+    - name: region
+      label: 地域
+      required: true
+      example: ap-guangzhou
+    - name: security_group_id
+      label: 安全组 ID
+      required: true
+      example: sg-33ocnj9n
+    - name: source_cidr
+      label: 允许的来源网段
+      default: "0.0.0.0/0"
+    - name: port_min
+      label: 起始端口
+      required: true
+      example: "20000"
+    - name: port_max
+      label: 结束端口
+      required: true
+      example: "20100"
+    - name: protocol
+      label: 协议
+      default: TCP
+      enum: [TCP, UDP]
+    - name: description
+      label: 规则描述
+      default: "YukiTunnel managed rule"
+
+  revoke_policy:
+    by: same_params
+
+  rate_limit_per_minute: 60
+
+  actions:
+    ensure_port_allowed:
+      operation: CreateSecurityGroupPolicies
+      body:
+        envelope: SecurityGroupPolicySet
+      params:
+        SecurityGroupId: "{{ .security_group_id }}"
+        # 腾讯云把规则包在 SecurityGroupPolicySet 里；body.envelope 会自动包一层
+        Ingress:
+          - Action: ACCEPT
+            # 协议必须大写
+            Protocol: '{{ proto "upper" .protocol }}'
+            # 腾讯云特有：连字符分隔；单端口时只写一个数字
+            Port: '{{ port_range "dash" .port_min .port_max }}'
+            CidrBlock: "{{ .source_cidr }}"
+            PolicyDescription: "{{ .description }}"
+      idempotent_check:
+        operation: DescribeSecurityGroupPolicies
+        params:
+          Region: "{{ .region }}"
+          SecurityGroupId: "{{ .security_group_id }}"
+        match:
+          path: "Response.SecurityGroupPolicySet.Ingress"
+          compare: port_range
+          fields:
+            Protocol: '{{ proto "upper" .protocol }}'
+            Port: '{{ port_range "dash" .port_min .port_max }}'
+            CidrBlock: "{{ .source_cidr }}"
+            Action: ACCEPT
+      success_when:
+        status: 200
+
+    revoke_port_allowed:
+      operation: DeleteSecurityGroupPolicies
+      body:
+        envelope: SecurityGroupPolicySet
+      params:
+        SecurityGroupId: "{{ .security_group_id }}"
+        Ingress:
+          - Action: ACCEPT
+            Protocol: '{{ proto "upper" .protocol }}'
+            Port: '{{ port_range "dash" .port_min .port_max }}'
+            CidrBlock: "{{ .source_cidr }}"
+      success_when:
+        status: 200
+        duplicate_codes: ["ResourceNotFound", "UnsupportedOperation.DuplicatePolicy"]

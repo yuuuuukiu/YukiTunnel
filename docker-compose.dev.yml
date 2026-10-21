@@ -1,0 +1,15 @@
+# Development overlay: build from source and expose the API on localhost only.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  yuki-server:
+    image: yukitunnel/server:dev
+    build:
+      context: .
+      args:
+        VERSION: dev
+    ports:
+      - "127.0.0.1:${API_PORT:-8443}:8443"
+      - "${CONTROL_PORT:-9443}:9443"
+      - "${PORT_RANGE_START:-20000}-${PORT_RANGE_END:-20100}:${PORT_RANGE_START:-20000}-${PORT_RANGE_END:-20100}"
+    environment:
+      YUKI_LOG_LEVEL: debug

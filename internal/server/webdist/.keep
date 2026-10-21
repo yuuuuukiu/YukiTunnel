@@ -1,0 +1,5 @@
+The release build copies web/dist here before compiling the server so the WebUI
+is embedded into the single binary. See scripts/build.sh.
+
+This placeholder file must stay in git: without it `go:embed all:webdist` fails
+on a fresh clone.

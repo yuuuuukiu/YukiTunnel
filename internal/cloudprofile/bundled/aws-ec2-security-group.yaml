@@ -1,0 +1,114 @@
+# AWS EC2 安全组 —— 官方维护 profile
+#
+# 依据：AWS EC2 API AuthorizeSecurityGroupIngress / RevokeSecurityGroupIngress /
+#       DescribeSecurityGroups（Signature Version 4，query 协议）。
+# 关键差异：端口是两个独立整数字段 FromPort/ToPort；协议小写；
+#          重复规则返回 InvalidPermission.Duplicate（视为成功）。
+apiVersion: yukitunnel.io/v1
+kind: CloudProfile
+metadata:
+  id: aws-ec2-security-group
+  name: AWS EC2 安全组
+  vendor: aws
+  version: 1.0.0
+  maintainer: yukitunnel
+  min_engine: 0.2.0
+  description: |
+    使用 AuthorizeSecurityGroupIngress 放行入方向端口，SigV4 签名，
+    DescribeSecurityGroups 幂等检查，重复规则错误码按成功处理。
+  docs:
+    - https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_AuthorizeSecurityGroupIngress.html
+    - https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_RevokeSecurityGroupIngress.html
+
+spec:
+  auth:
+    engine: aws-sigv4
+    credential_fields: [access_key_id, secret_access_key, region, session_token]
+    service: ec2
+    version: "2016-11-15"
+
+  endpoint:
+    template: "https://ec2.{{ .region }}.amazonaws.com/"
+    method: POST
+    content_type: application/x-www-form-urlencoded
+    query:
+      Version: "2016-11-15"
+
+  allowed_hosts:
+    - "ec2.*.amazonaws.com"
+
+  permissions:
+    - "ec2:DescribeSecurityGroups"
+    - "ec2:AuthorizeSecurityGroupIngress"
+    - "ec2:RevokeSecurityGroupIngress"
+
+  parameters:
+    - name: region
+      label: 区域
+      required: true
+      example: us-east-1
+    - name: security_group_id
+      label: 安全组 ID
+      required: true
+      example: sg-1a2b3c4d
+    - name: source_cidr
+      label: 允许的来源网段
+      default: "0.0.0.0/0"
+    - name: port_min
+      label: 起始端口
+      required: true
+      example: "20000"
+    - name: port_max
+      label: 结束端口
+      required: true
+      example: "20100"
+    - name: protocol
+      label: 协议
+      default: tcp
+      enum: [tcp, udp]
+    - name: description
+      label: 规则描述
+      default: "YukiTunnel managed rule"
+
+  revoke_policy:
+    by: same_params
+
+  rate_limit_per_minute: 60
+
+  actions:
+    ensure_port_allowed:
+      operation: AuthorizeSecurityGroupIngress
+      params:
+        GroupId: "{{ .security_group_id }}"
+        # AWS 特有：端口拆成两个字段，且协议小写
+        IpPermissions.1.IpProtocol: '{{ proto "lower" .protocol }}'
+        IpPermissions.1.FromPort: "{{ .port_min }}"
+        IpPermissions.1.ToPort: "{{ .port_max }}"
+        IpPermissions.1.IpRanges.1.CidrIp: "{{ .source_cidr }}"
+        IpPermissions.1.IpRanges.1.Description: "{{ .description }}"
+      idempotent_check:
+        operation: DescribeSecurityGroups
+        params:
+          GroupId: "{{ .security_group_id }}"
+        match:
+          path: "SecurityGroups.0.IpPermissions"
+          compare: port_range
+          fields:
+            IpProtocol: '{{ proto "lower" .protocol }}'
+            # AWS 返回的是两个数字字段；引擎会把 "FromPort" 拼成 FromPort-ToPort
+            FromPort: "{{ .port_min }}"
+      success_when:
+        status: 200
+        duplicate_codes: ["InvalidPermission.Duplicate"]
+
+    revoke_port_allowed:
+      operation: RevokeSecurityGroupIngress
+      params:
+        GroupId: "{{ .security_group_id }}"
+        IpPermissions.1.IpProtocol: '{{ proto "lower" .protocol }}'
+        IpPermissions.1.FromPort: "{{ .port_min }}"
+        IpPermissions.1.ToPort: "{{ .port_max }}"
+        IpPermissions.1.IpRanges.1.CidrIp: "{{ .source_cidr }}"
+      success_when:
+        status: 200
+        duplicate_codes: ["InvalidPermission.NotFound"]

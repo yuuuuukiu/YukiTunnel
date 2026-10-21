@@ -1,0 +1,117 @@
+# 华为云 VPC 安全组 —— 官方维护 profile
+#
+# 依据：华为云 VPC API v2 CreateSecurityGroupRule / DeleteSecurityGroupRule /
+#       ListSecurityGroupRules；字段定义取自 huaweicloud-sdk-go-v3
+#       model_create_security_group_rule_option.go。
+# 关键差异：端口是 port_range_min / port_range_max 两个整数；
+#          direction=ingress；请求体包一层 {"security_group_rule": {...}}；
+#          鉴权用 X-Auth-Token（IAM Token）+ X-Project-Id，而非请求签名。
+apiVersion: yukitunnel.io/v1
+kind: CloudProfile
+metadata:
+  id: huawei-vpc-security-group
+  name: 华为云 VPC 安全组
+  vendor: huawei
+  version: 1.0.0
+  maintainer: yukitunnel
+  min_engine: 0.2.0
+  description: |
+    调用 v2 CreateSecurityGroupRule 放行入方向端口。鉴权使用 AK/SK 换取的
+    IAM Token（X-Auth-Token）；执行前用 ListSecurityGroupRules 做幂等检查。
+  docs:
+    - https://support.huaweicloud.com/api-vpc/vpc_api_0009.html
+    - https://support.huaweicloud.com/api-vpc/vpc_api_0011.html
+
+spec:
+  auth:
+    engine: huawei-aksk
+    credential_fields: [iam_token, project_id]
+    service: vpc
+    version: "v2"
+
+  endpoint:
+    template: "https://vpc.{{ .region }}.myhuaweicloud.com/v2/{{ .project_id }}/security-group-rules"
+    method: POST
+    content_type: application/json;charset=utf8
+
+  allowed_hosts:
+    - "vpc.*.myhuaweicloud.com"
+
+  permissions:
+    - "vpc:securityGroupRules:create"
+    - "vpc:securityGroupRules:delete"
+    - "vpc:securityGroupRules:list"
+
+  parameters:
+    - name: region
+      label: 区域
+      required: true
+      example: cn-north-4
+    - name: project_id
+      label: 项目 ID
+      required: true
+      example: a4adasfjljaaaakla12334jklga9sasfg
+    - name: security_group_id
+      label: 安全组 ID
+      required: true
+      example: 81ed12e1-1f5b-4b1c-9d0e-2a1f0e9c8b7a
+    - name: source_cidr
+      label: 允许的来源网段
+      default: "0.0.0.0/0"
+    - name: port_min
+      label: 起始端口
+      required: true
+      example: "20000"
+    - name: port_max
+      label: 结束端口
+      required: true
+      example: "20100"
+    - name: protocol
+      label: 协议
+      default: tcp
+      enum: [tcp, udp]
+    - name: description
+      label: 规则描述
+      default: "YukiTunnel managed rule"
+
+  revoke_policy:
+    by: rule_id
+
+  rate_limit_per_minute: 60
+
+  actions:
+    ensure_port_allowed:
+      operation: CreateSecurityGroupRule
+      # 华为云把规则包在 security_group_rule 里
+      body:
+        envelope: security_group_rule
+      params:
+        security_group_id: "{{ .security_group_id }}"
+        direction: ingress
+        ethertype: IPv4
+        protocol: '{{ proto "lower" .protocol }}'
+        # 华为云特有：端口是 min/max 两个整数字段
+        port_range_min: "{{ .port_min }}"
+        port_range_max: "{{ .port_max }}"
+        remote_ip_prefix: "{{ .source_cidr }}"
+        description: "{{ .description }}"
+      idempotent_check:
+        operation: ListSecurityGroupRules
+        params: {}
+        match:
+          path: "security_group_rules"
+          compare: port_range
+          fields:
+            direction: ingress
+            protocol: '{{ proto "lower" .protocol }}'
+            remote_ip_prefix: "{{ .source_cidr }}"
+      success_when:
+        status: 200
+
+    revoke_port_allowed:
+      operation: DeleteSecurityGroupRule
+      params:
+        rule_id: "{{ .rule_id }}"
+      success_when:
+        status: 204
+        duplicate_codes: ["VPC.9909"]

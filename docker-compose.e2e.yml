@@ -1,0 +1,16 @@
+# Overlay used by scripts/e2e-local.sh.
+#
+# The base compose file pins container_name: yuki-server so that operators get a
+# predictable name. The E2E test runs under a separate project, so the name must
+# be released or Docker refuses to start a second instance.
+services:
+  yuki-server:
+    container_name: yuki-server-e2e
+    # The volume name is fixed in the base file; give the test its own volume so
+    # a running production stack is never touched.
+    volumes:
+      - yuki-data-e2e:/data
+
+volumes:
+  yuki-data-e2e:
+    name: yuki-data-e2e

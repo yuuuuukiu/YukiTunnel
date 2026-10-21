@@ -1,0 +1,38 @@
+# Version control / CI
+.git
+.github
+
+# Build outputs
+bin
+dist
+web/dist
+desktop/dist
+
+# Node dependencies (installed inside the image)
+**/node_modules
+.pnpm-store
+
+# Rust build artifacts — the real path is src-tauri/target (≈3.5 GB).
+# Getting this wrong pushes the whole toolchain into the build context.
+desktop/src-tauri/target
+desktop/src-tauri/gen
+**/target
+
+# Local runtime data and secrets
+data
+*.db
+*.db-wal
+*.db-shm
+logs
+secrets
+*.key
+.env
+.env.local
+
+# OS / editor noise
+**/.DS_Store
+.idea
+.vscode
+
+# Documentation images are large and not needed for the build
+docs/screenshots

@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: Go (test + vet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+      - run: go mod download
+      - run: gofmt -l . | tee /tmp/fmt.txt && test ! -s /tmp/fmt.txt
+      - run: go vet ./...
+      - run: go test ./... -race -timeout 300s
+      - name: End-to-end smoke
+        run: bash scripts/smoke.sh
+      - name: End-to-end full stack (no docker)
+        run: bash scripts/e2e-local.sh --no-docker
+      - name: Verify profile signatures
+        run: go test ./internal/cloudprofile/... -run 'Registry|Signature|Official' -v
+
+  web:
+    name: WebUI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  desktop:
+    name: Desktop (Rust + React)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Prepare sidecar stubs
+        run: |
+          mkdir -p desktop/src-tauri/binaries
+          triple=$(rustc -vV | awk '/host:/ {print $2}')
+          for b in yuki yuki-server; do
+            printf '#!/bin/sh\nexit 0\n' > "desktop/src-tauri/binaries/${b}-${triple}"
+            chmod +x "desktop/src-tauri/binaries/${b}-${triple}"
+          done
+      - run: pnpm install --frozen-lockfile
+        working-directory: desktop
+      - run: pnpm build
+        working-directory: desktop
+      - run: cargo check --locked
+        working-directory: desktop/src-tauri
+
+  firewall:
+    name: Firewall adapters
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - name: Unit tests (fake runner)
+        run: go test ./internal/firewall -v -race -timeout 120s
+      - name: Doctor reports firewall status
+        run: |
+          mkdir -p bin
+          go build -o bin/yuki-server ./cmd/yuki-server
+          mkdir -p /tmp/yt
+          ./bin/yuki-server init --data-dir /tmp/yt \
+            --api-addr 127.0.0.1:18999 --control-addr 127.0.0.1:19999 \
+            --admin-password test12345 --port-min 29000 --port-max 29010 >/dev/null
+          ./bin/yuki-server doctor --data-dir /tmp/yt | grep -q 系统防火墙
+
+  windows:
+    name: Windows (build + smoke)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+      - name: Build amd64 + 386
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -Arch all -Version ci
+      - name: Smoke test (amd64)
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1 -BinDir bin/windows -Arch amd64
+      - name: Smoke test (x86)
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1 -BinDir bin/windows -Arch 386
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: yukitunnel/server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

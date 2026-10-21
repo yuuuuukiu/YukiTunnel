@@ -48,11 +48,29 @@
 
 ```
 gofmt / go vet        无输出
-go test ./...         8 包全绿，109 个测试
+go test ./...         8 包全绿，130+ 个测试
 go test -race         全绿
 连续 3 次全量测试      稳定
-CI                    连续 4 次 success
+CI                    连续 6 次 success
+包覆盖率              cloudprofile 73.6% / registry 74.6% / tunnel 61.2%
+                      firewall 53.7% / server 51.5% / store 36.4%
 ```
+
+### 本轮发现并修复的真实缺陷
+
+| 缺陷 | 影响 |
+| --- | --- |
+| CLI 用开发密钥验签 | `profile index` 拒绝同一二进制通过 HTTP 接受的索引 |
+| 安装路径缺 `profiles/` 前缀 | 所有远端安装 404，静默回退内置副本 |
+| 管理员无法禁用普通用户 | WebUI「禁用」按钮永远报 `LAST_ADMIN` |
+| 桌面端无管理页 | 三端对等需求不成立 |
+| 缺 `icon.icns` | `tauri build` 无法产出安装包 |
+| 版本号取 commit hash | 开发构建看起来像已发布版本 |
+| `build.sh` 删除 `.keep` | 全新 clone 无法 `go build` |
+| Docker 只读命令触发初始化 | `docker run image --version` 污染数据卷 |
+| `--json` 失败输出纯文本 | 脚本无法解析错误 |
+| HTTPS 隧道零测试 | 四种协议里唯一无覆盖的 |
+| `.gitignore` 漏 `secrets/` | 私钥可能被误提交 |
 
 ---
 

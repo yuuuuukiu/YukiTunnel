@@ -99,6 +99,10 @@ cd desktop/src-tauri && cargo check
 - [ ] 阿里云 `bash scripts/live-test-aliyun.sh` 全 PASS（**需真实 AK/SK**）
 - [ ] 腾讯云 `profile run --dry-run --ack` 成功（需凭证）
 - [ ] 腾讯云 `bash scripts/live-test-tencent.sh` 全 PASS（**需真实 AK/SK**）
+- [x] Azure 真实 API 可达（假 token 返回结构化 `InvalidSubscriptionId` / `SubscriptionNotFound`）
+- [x] Azure `revoke` 发送 DELETE（此前误发 PUT，只清空规则不删除）
+- [x] Azure 请求体符合 NSG schema（`protocol: Tcp`、`priority: "1000"`、`destinationPortRange: "26000-26010"`）
+- [ ] Azure 真实订阅联调（**需真实 access_token + subscription_id**）
 - [ ] 错误凭证返回可读错误（`InvalidAccessKeyId.NotFound` / `AuthFailure`）
 - [ ] 联调记录已填入 `docs/ACCEPTANCE-PROFILES.md`
 

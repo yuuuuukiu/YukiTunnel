@@ -98,6 +98,38 @@ CI                    连续 9 次 success
 
 ---
 
+## 待你验证后才能发布
+
+代码已就绪，但**尚未打 tag**。等你完成下面两项真实联调后再发布正式版。
+
+### Azure 联调（新增）
+
+```bash
+yuki-server profile install azure-nsg
+yuki-server profile credential set azure-nsg \
+  --field access_token=<Azure access token> \
+  --field subscription_id=<订阅 ID> \
+  --field resource_group=<资源组>
+
+# 1. 先看请求体（凭据自动打码）
+yuki-server profile run azure-nsg --dry-run --show-request --ack \
+  --param subscription_id=<订阅 ID> --param resource_group=<资源组> \
+  --param nsg_name=<NSG 名> --param rule_name=YukiTunnel-20000-20100
+
+# 2. 确认后真实执行
+yuki-server profile run azure-nsg --ack \
+  --param subscription_id=<订阅 ID> --param resource_group=<资源组> \
+  --param nsg_name=<NSG 名> --param rule_name=YukiTunnel-20000-20100
+
+# 3. 回收
+yuki-server profile run azure-nsg --action revoke_port_allowed --ack \
+  --param subscription_id=<订阅 ID> --param resource_group=<资源组> \
+  --param nsg_name=<NSG 名> --param rule_name=YukiTunnel-20000-20100
+```
+
+已用假凭证验证：请求能真实到达 Azure API，返回结构化错误
+（`InvalidSubscriptionId` / `SubscriptionNotFound`），说明 URL、鉴权头、请求体链路正确。
+
 ## 仍未完成（需要你）
 
 ### 1. 真实云联调（需要 AK/SK）

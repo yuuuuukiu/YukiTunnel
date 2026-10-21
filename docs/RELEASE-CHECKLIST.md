@@ -92,10 +92,13 @@ cd desktop/src-tauri && cargo check
 
 ## 4. 云 Profile 联调
 
-- [ ] 阿里云 `profile install` + `dry-run` 成功
-- [ ] 阿里云 `bash scripts/live-test-aliyun.sh` 全 PASS
-- [ ] 腾讯云 `profile install` + `dry-run` 成功
-- [ ] 腾讯云 `bash scripts/live-test-tencent.sh` 全 PASS
+- [x] 远端镜像 `profile index` 显示「已验签」（key_id: yuki-profiles-2026）
+- [x] 远端镜像 `profile install` 走网络（来源为 `.../profiles`，非 `builtin`）
+- [x] 错误凭证返回 `InvalidAccessKeyId.NotFound`（已用假 AK 验证过一次真实调用）
+- [ ] 阿里云 `profile run --dry-run --ack` 成功（需凭证）
+- [ ] 阿里云 `bash scripts/live-test-aliyun.sh` 全 PASS（**需真实 AK/SK**）
+- [ ] 腾讯云 `profile run --dry-run --ack` 成功（需凭证）
+- [ ] 腾讯云 `bash scripts/live-test-tencent.sh` 全 PASS（**需真实 AK/SK**）
 - [ ] 错误凭证返回可读错误（`InvalidAccessKeyId.NotFound` / `AuthFailure`）
 - [ ] 联调记录已填入 `docs/ACCEPTANCE-PROFILES.md`
 
@@ -110,6 +113,9 @@ cd desktop/src-tauri && cargo check
 - [ ] 隧道启动后公网地址可从外部访问
 - [ ] 停止隧道后端口立即不可达
 - [ ] 客户端断网 30 秒恢复后隧道自动重连
+- [ ] 桌面端 `.app` / `.dmg` / `.exe` 安装包可安装并启动
+- [ ] 桌面端管理员登录后能看到「管理」分组（7 个页面）
+- [ ] 桌面端「部署服务端」向导完整跑通一次
 
 ---
 

@@ -315,6 +315,29 @@ function RunModal({ profile, onClose }: { profile: CloudProfile; onClose: () => 
   });
 
   const declared = useMemo(() => parseParameters(doc.data?.document ?? ''), [doc.data]);
+  // Which fields this vendor needs, e.g. [access_token, subscription_id, ...].
+  const credFields = useMemo(
+    () => parseCredentialFields(doc.data?.document ?? ''),
+    [doc.data],
+  );
+
+  // Inline credential editor. Without it the dropdown could only pick from
+  // credentials that already existed, so a first-time user had no way in.
+  const [editingCred, setEditingCred] = useState(false);
+  const [credLabel, setCredLabel] = useState('default');
+  const [credValues, setCredValues] = useState<Record<string, string>>({});
+
+  const saveCred = useMutation({
+    mutationFn: () =>
+      profilesApi.setCredential(profile.id, credLabel.trim() || 'default', credValues),
+    onSuccess: () => {
+      toast.success('凭证已保存', '已加密存储，仅本服务端可读');
+      setEditingCred(false);
+      setCredValues({});
+      void qc.invalidateQueries({ queryKey: ['profile-creds', profile.id] });
+    },
+    onError: (e) => toast.error('保存失败', e instanceof Error ? e.message : ''),
+  });
 
   const run = useMutation({
     mutationFn: () =>
@@ -383,14 +406,100 @@ function RunModal({ profile, onClose }: { profile: CloudProfile; onClose: () => 
           </select>
         </Field>
       </div>
-      <Field label="凭证" hint={creds.data?.credentials.length ? '凭证已加密存储' : '尚未配置凭证'}>
-        <select value={credential} onChange={(e) => setCredential(e.target.value)}>
-          <option value="default">default</option>
-          {(creds.data?.credentials ?? []).map((c) => (
-            <option key={c.id} value={c.label}>{c.label}</option>
-          ))}
-        </select>
+      <Field
+        label="凭证"
+        hint={
+          creds.data?.credentials.length
+            ? '凭证已加密存储'
+            : `尚未配置凭证 — 需要 ${credFields.length ? credFields.join(' / ') : '该厂商的密钥字段'}`
+        }
+      >
+        <div className="row gap-8">
+          <select
+            value={credential}
+            onChange={(e) => setCredential(e.target.value)}
+            style={{ flex: 1 }}
+          >
+            <option value="default">default</option>
+            {(creds.data?.credentials ?? []).map((c) => (
+              <option key={c.id} value={c.label}>{c.label}</option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            size="sm"
+            variant="subtle"
+            onClick={() => {
+              setEditingCred((v) => !v);
+              setCredLabel(credential);
+            }}
+          >
+            {editingCred ? '收起' : creds.data?.credentials.length ? '管理' : '配置凭证'}
+          </Button>
+        </div>
       </Field>
+
+      {editingCred && (
+        <div className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="small muted">
+            为 <strong>{profile.id}</strong> 保存一份凭证。字段来自 profile 的
+            <code className="mono"> auth.credential_fields </code>，加密后存于服务端数据库。
+          </div>
+          <Field label="凭证名称" hint="同一 profile 可保存多份，例如 default / prod">
+            <input value={credLabel} onChange={(e) => setCredLabel(e.target.value)} placeholder="default" />
+          </Field>
+          {credFields.length === 0 ? (
+            <div className="alert alert-warn">该 profile 未声明 credential_fields，无法配置凭证。</div>
+          ) : (
+            credFields.map((f) => (
+              <Field key={f} label={f}>
+                <input
+                  type={/token|secret|key|password/i.test(f) ? 'password' : 'text'}
+                  value={credValues[f] ?? ''}
+                  onChange={(e) => setCredValues((p) => ({ ...p, [f]: e.target.value }))}
+                  placeholder={f}
+                  autoComplete="off"
+                />
+              </Field>
+            ))
+          )}
+          <div className="row gap-8">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => saveCred.mutate()}
+              disabled={saveCred.isPending || credFields.length === 0}
+            >
+              {saveCred.isPending ? '保存中…' : '保存凭证'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setEditingCred(false)}>
+              取消
+            </Button>
+          </div>
+          {(creds.data?.credentials ?? []).length > 0 && (
+            <div className="hint-list">
+              {creds.data!.credentials.map((c) => (
+                <div key={c.id} className="row gap-8 space-between">
+                  <span className="mono small">{c.label}</span>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => {
+                      if (!confirm(`删除凭证 ${c.label}？`)) return;
+                      void profilesApi.deleteCredential(profile.id, c.id).then(() => {
+                        toast.success('已删除');
+                        void qc.invalidateQueries({ queryKey: ['profile-creds', profile.id] });
+                      });
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {declared.length > 0 && (
         <div className="grid grid-2">
@@ -508,5 +617,44 @@ function parseParameters(yaml: string): { name: string; label: string; required:
     }
   }
   flush();
+  return out;
+}
+
+/**
+ * parseCredentialFields reads spec.auth.credential_fields from a profile
+ * document.
+ *
+ * The credential form has to know which fields a vendor expects — Azure wants
+ * access_token/subscription_id/resource_group, Aliyun wants an AK pair — and
+ * that list is the only source of truth. Without this the UI could offer a
+ * dropdown of existing credentials but no way to create one.
+ */
+export function parseCredentialFields(yaml: string): string[] {
+  const lines = yaml.split('\n');
+  const start = lines.findIndex((l) => /^\s*credential_fields:/.test(l));
+  if (start === -1) return [];
+  const inline = lines[start].split('credential_fields:')[1]?.trim() ?? '';
+  // Flow style: credential_fields: [a, b]
+  if (inline.startsWith('[')) {
+    return inline
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+      .filter(Boolean);
+  }
+  // Block style:
+  //   credential_fields:
+  //     - a
+  //     - b
+  const out: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(/^\s+-\s*(.+)$/);
+    if (!m) {
+      if (line.trim() === '') continue;
+      break;
+    }
+    out.push(m[1].trim().replace(/^["']|["']$/g, ''));
+  }
   return out;
 }

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -594,5 +595,41 @@ func TestActionMethodOverrideIsHonoured(t *testing.T) {
 	}
 	if req.Method != "DELETE" {
 		t.Fatalf("revoke request method = %q, want DELETE", req.Method)
+	}
+}
+
+// TestCredentialFieldsAreDeclaredForEveryProfile guards the admin UI's
+// credential form: it builds inputs from auth.credential_fields, so a profile
+// without that list would render a form with no fields and no way to save.
+func TestCredentialFieldsAreDeclaredForEveryProfile(t *testing.T) {
+	paths, err := filepath.Glob("../../profiles/*.yaml")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no profiles found: %v", err)
+	}
+	want := map[string][]string{
+		"azure-nsg":                  {"access_token", "subscription_id", "resource_group"},
+		"aliyun-ecs-security-group":  {"access_key_id", "access_key_secret"},
+		"gcp-firewall":               {"access_token", "project"},
+		"huawei-vpc-security-group":  {"iam_token", "project_id"},
+		"tencent-vpc-security-group": {"secret_id", "secret_key", "region"},
+	}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p Profile
+		if err := yaml.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if len(p.Spec.Auth.CredentialFields) == 0 {
+			t.Fatalf("%s declares no credential_fields; the UI could not configure it", path)
+		}
+		if expected, ok := want[p.Metadata.ID]; ok {
+			got := strings.Join(p.Spec.Auth.CredentialFields, ",")
+			if got != strings.Join(expected, ",") {
+				t.Errorf("%s credential_fields = %v, want %v", p.Metadata.ID, p.Spec.Auth.CredentialFields, expected)
+			}
+		}
 	}
 }

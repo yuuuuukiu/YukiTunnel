@@ -51,6 +51,7 @@ jobs:
 
       - name: No signing material committed
         run: |
+          # Match key files, not scripts that merely mention signing.
           if git ls-files | grep -qE '(profile-signing\.key|\.pem$|\.p12$)'; then
             echo "::error::signing material must never be committed"
             git ls-files | grep -E '(profile-signing\.key|\.pem$|\.p12$)'

@@ -257,16 +257,58 @@ yuki-server profile mirror set --proxy socks5://127.0.0.1:1080
 
 ### 6.3 R2 secrets（仅发布方需要）
 
-| Secret | 用途 |
-| --- | --- |
-| `R2_ACCESS_KEY_ID` | R2 API Token 的 Access Key |
-| `R2_SECRET_ACCESS_KEY` | R2 API Token 的 Secret |
-| `R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
-| `PROFILE_SIGNING_KEY` | base64 的 ed25519 私钥 PEM |
+R2 同步运行在 **registry 仓库**（`yuuuuukiu/yukitunnel-profiles`）的
+`.github/workflows/sign.yml` 里，因为 profile 更新不应该要求发布新版本。
 
-Variable（可选）：`R2_BUCKET`，默认 `yukitunnel-profiles`。
+在该仓库设置：
 
-fork PR 没有这些 secrets，workflow 会跳过上传并打印 warning，不会变红。
+| 类型 | 名称 | 值 |
+| --- | --- | --- |
+| Secret | `R2_ACCESS_KEY_ID` | R2 API Token 的 Access Key ID |
+| Secret | `R2_SECRET_ACCESS_KEY` | R2 API Token 的 Secret |
+| Secret | `R2_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` |
+| Secret | `PROFILE_SIGNING_KEY` | base64 的 ed25519 私钥 PEM |
+| Variable | `R2_BUCKET` | `yuki-tunnel-profile` |
+| Variable | `PROFILE_KEY_ID` | `yuki-profiles-2026` |
+
+主仓库只需要 `PROFILE_SIGNING_KEY`（用于 release 时签名内置副本）。
+
+**为什么这些不会泄露：**
+
+- GitHub Secrets 只写不读：设置后在 UI 里看不到值，API 也不返回明文
+- 日志自动打码：任何 `echo $SECRET` 都会输出 `***`
+- `pull_request` 事件（含 fork PR）**拿不到 secrets**，这是 GitHub 的硬性隔离
+- workflow 里没有 `pull_request_target`，不存在把 secrets 暴露给不可信代码的路径
+- R2 Token 建议**只授权单个 bucket 的 Object Read & Write**，即使泄露也无法碰其他资源
+
+fork PR 触发的是 registry 仓库的 `push` 吗？不是——fork 的 PR 在**主仓库**跑
+`Profiles` workflow，只做校验，不含任何上传步骤，因此不会变红也不需要 secrets。
+
+### 6.4 自定义域（R2）
+
+```
+Cloudflare Dashboard → R2 → yuki-tunnel-profile → Settings → Custom Domains
+  → Add  tunnel.yuuuuukiu.top
+```
+
+Cloudflare 会自动创建 `CNAME tunnel → yuki-tunnel-profile.r2.cloudflarestorage.com`。
+**不要手动加 A 记录**，也不要把它指向服务器 IP。
+
+同步后的 bucket 布局（与 GitHub 仓库一致）：
+
+```
+s3://yuki-tunnel-profile/profiles/index.json
+s3://yuki-tunnel-profile/profiles/index.json.sig
+s3://yuki-tunnel-profile/profiles/aliyun-ecs-security-group.yaml
+...
+```
+
+验证：
+
+```bash
+curl -fsSL https://tunnel.yuuuuukiu.top/profiles/index.json | head -c 120
+curl -fsSL https://tunnel.yuuuuukiu.top/profiles/index.json.sig | head -c 80
+```
 
 ### 6.4 签名密钥
 

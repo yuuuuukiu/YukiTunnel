@@ -12,6 +12,8 @@ set -euo pipefail
 
 OWNER="${1:-${GH_OWNER:-yuuuuukiu}}"
 REPO="yukitunnel-profiles"
+# Must match the existing R2 bucket; the custom domain CNAME targets it.
+BUCKET="${R2_BUCKET:-yuki-tunnel-profile}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -61,7 +63,7 @@ DOC
 sed -i.bak "s/OWNER/$OWNER/g" "$WORK/README.md" && rm -f "$WORK/README.md.bak"
 
 cat > "$WORK/.github-workflow-sign.yml" <<'YML'
-name: Sign registry
+name: Sign and publish registry
 
 on:
   push:
@@ -71,39 +73,130 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: sign-registry
+  cancel-in-progress: false
+
 jobs:
   sign:
     runs-on: ubuntu-latest
+    env:
+      # Declared at job level so the step-level `if:` conditions below can
+      # actually see them. Secrets are masked in logs and never echo'd.
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ vars.R2_BUCKET || 'BUCKET_NAME' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: '1.24' }
 
-      - name: Fetch signer from the main repo
-        run: |
-          git clone --depth 1 https://github.com/OWNER/yukitunnel /tmp/yt
-          cd /tmp/yt && go build -o /tmp/yuki-profile-sign ./cmd/yuki-profile-sign
-
-      - name: Validate and sign
-        env:
-          PROFILE_SIGNING_KEY: ${{ secrets.PROFILE_SIGNING_KEY }}
+      - name: Build the signer from the main repo
         run: |
           set -euo pipefail
-          [ -n "${PROFILE_SIGNING_KEY:-}" ] || { echo "::error::PROFILE_SIGNING_KEY missing"; exit 1; }
+          git clone --depth 1 "https://github.com/OWNER/yukitunnel" /tmp/yt
+          cd /tmp/yt
+          go build -trimpath -o /tmp/yuki-profile-sign ./cmd/yuki-profile-sign
+
+      - name: Sign index.json
+        env:
+          PROFILE_SIGNING_KEY: ${{ secrets.PROFILE_SIGNING_KEY }}
+          PROFILE_KEY_ID: ${{ vars.PROFILE_KEY_ID || 'yuki-profiles-2026' }}
+        run: |
+          set -euo pipefail
+          [ -n "${PROFILE_SIGNING_KEY:-}" ] || { echo "::error::PROFILE_SIGNING_KEY is not set"; exit 1; }
           printf '%s' "$PROFILE_SIGNING_KEY" | base64 -d > /tmp/key.pem
           chmod 600 /tmp/key.pem
-          /tmp/yuki-profile-sign -dir profiles -key /tmp/key.pem \
-            -key-id "${PROFILE_KEY_ID:-yuki-profiles-2026}"
+          /tmp/yuki-profile-sign -dir profiles -key /tmp/key.pem -key-id "$PROFILE_KEY_ID"
+
+      - name: Verify the signature round-trips
+        run: |
+          set -euo pipefail
+          cd /tmp/yt
+          # The verifier lives in the main repo; run its registry tests against
+          # the freshly signed documents.
+          cp -R "$GITHUB_WORKSPACE/profiles/." profiles/
+          go test ./internal/cloudprofile/... -run 'Signature|Registry|Official' -count=1
 
       - name: Commit signed index
         run: |
+          set -euo pipefail
+          rm -f /tmp/key.pem
           git config user.name  "github-actions[bot]"
-          git config user.email "bot@yuuuuukiu.top"
+          git config user.email "bot@OWNER-DOMAIN"
           git add profiles/index.json profiles/index.json.sig
-          git diff --staged --quiet || git commit -m "chore: sign index"
-          git push
+          if git diff --staged --quiet; then
+            echo "index unchanged"
+          else
+            git commit -m "chore: sign index"
+            git push
+          fi
+
+      # Mirrored bytes must be identical to what GitHub serves: the client
+      # verifies the signature, but a stale R2 copy would silently win the
+      # fallback race and serve an old catalogue.
+      - name: Sync to Cloudflare R2
+        if: ${{ env.R2_ENDPOINT != '' }}
+        run: |
+          set -euo pipefail
+          command -v aws >/dev/null || pip install --quiet awscli
+          # Upload under profiles/ so the bucket layout matches the repo.
+          for f in profiles/*.yaml profiles/index.json profiles/index.json.sig; do
+            case "$f" in
+              *.json|*.sig) ct=application/json ;;
+              *)            ct=application/yaml ;;
+            esac
+            aws s3 cp "$f" "s3://$R2_BUCKET/$f" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --content-type "$ct" \
+              --cache-control "public, max-age=300"
+          done
+          echo "synced to s3://$R2_BUCKET/profiles/"
+
+      - name: R2 not configured (skipped)
+        if: ${{ env.R2_ENDPOINT == '' }}
+        run: |
+          echo "::warning::R2_ENDPOINT is not set; the mirror was not updated."
+          echo "Set R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_ENDPOINT to enable it."
+
+  verify-mirrors:
+    name: Verify public mirrors agree
+    needs: sign
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare jsDelivr, raw and R2
+        run: |
+          set -euo pipefail
+          urls=(
+            "https://cdn.jsdelivr.net/gh/OWNER/yukitunnel-profiles@main/profiles/index.json"
+            "https://raw.githubusercontent.com/OWNER/yukitunnel-profiles/main/profiles/index.json"
+            "https://tunnel.yuuuuukiu.top/profiles/index.json"
+          )
+          declare -a sums=()
+          for u in "${urls[@]}"; do
+            if body=$(curl -fsSL --max-time 20 "$u"); then
+              s=$(printf '%s' "$body" | sha256sum | cut -d' ' -f1)
+              echo "OK    $u  ${s:0:16}"
+              sums+=("$s")
+            else
+              echo "SKIP  $u (unreachable)"
+            fi
+          done
+          if [ ${#sums[@]} -lt 2 ]; then
+            echo "::warning::fewer than two mirrors reachable; skipping comparison"
+            exit 0
+          fi
+          first="${sums[0]}"
+          for s in "${sums[@]}"; do
+            if [ "$s" != "$first" ]; then
+              echo "::error::mirrors disagree — a client could pin a stale index"
+              exit 1
+            fi
+          done
+          echo "all reachable mirrors agree"
 YML
-sed -i.bak "s/OWNER/$OWNER/g" "$WORK/.github-workflow-sign.yml" && rm -f "$WORK/.github-workflow-sign.yml.bak"
+sed -i.bak -e "s/OWNER-DOMAIN/$OWNER.top/g" -e "s/OWNER/$OWNER/g" -e "s/BUCKET_NAME/$BUCKET/g" "$WORK/.github-workflow-sign.yml" && rm -f "$WORK/.github-workflow-sign.yml.bak"
 
 if gh repo view "$OWNER/$REPO" >/dev/null 2>&1; then
   echo "    repo exists, updating files"

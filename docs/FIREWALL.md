@@ -19,6 +19,19 @@ YukiTunnel 在隧道启动时自动放行公网端口，停止时回收，启动
 | Windows | — | — | ❌ Unsupported（用系统防火墙界面或组策略） |
 | macOS | — | — | ❌ Unsupported（用「系统设置 → 网络 → 防火墙」） |
 
+### 真实环境验证记录
+
+| 环境 | 结果 |
+| --- | --- |
+| Alpine + ufw 未启用 | `ufw 未启用，入站默认 unknown，不自动放行` ✅ |
+| Alpine + ufw active + `default deny incoming` | `ufw 已启用，入站默认 deny，自动放行` ✅ |
+| `ufw allow 20000/tcp comment yukitunnel` | 规则带 `# yukitunnel` 标记，v4/v6 各一条 ✅ |
+| `ufw --force delete allow 20000/tcp` | 规则被移除 ✅ |
+| macOS（本机） | `unsupported（该平台请使用系统自带防火墙界面…）` ✅ |
+
+> 在 `--privileged` Linux 容器里用真实 ufw 验证了检测与命令语法；
+> firewalld / nftables 仍只有 fake-runner 测试覆盖。
+
 ### 检测结果字段
 
 ```json

@@ -18,24 +18,33 @@ import { readInsecure, writeInsecure } from '../lib/transport';
  * token field among unrelated options.
  */
 export default function ConnectPage() {
-  const { user, serverUrl, setServerUrl, login, loginWithKey, loginWithToken } = useAuth();
+  const {
+    user, serverUrl, setServerUrl, login, loginWithKey, loginWithToken,
+    remembered, forgetCredentials,
+  } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user) navigate('/', { replace: true });
   }, [user, navigate]);
 
-  const [role, setRole] = useState<'client' | 'admin'>('client');
-  const [url, setUrl] = useState(serverUrl ?? 'https://');
+  const [role, setRole] = useState<'client' | 'admin'>(
+    remembered.mode === 'token' ? 'admin' : 'client',
+  );
+  const [url, setUrl] = useState(serverUrl ?? remembered.serverUrl ?? 'https://');
   const [insecure, setInsecure] = useState(readInsecure);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Default to remembering: the whole point is not having to sign in again.
+  const [remember, setRemember] = useState(true);
 
-  // client credentials
-  const [username, setUsername] = useState('');
+  // client credentials, pre-filled from the last successful sign-in
+  const [username, setUsername] = useState(remembered.username ?? '');
   const [password, setPassword] = useState('');
   const [keyPath, setKeyPath] = useState('');
-  const [credMode, setCredMode] = useState<'password' | 'key'>('password');
+  const [credMode, setCredMode] = useState<'password' | 'key'>(
+    remembered.mode === 'key' ? 'key' : 'password',
+  );
 
   // admin credentials
   const [token, setToken] = useState('');
@@ -65,10 +74,10 @@ export default function ConnectPage() {
       if (!username.trim()) throw new Error('请填写管理员分配的用户名');
       if (credMode === 'password') {
         if (!password) throw new Error('请输入密码');
-        await login(username.trim(), password);
+        await login(username.trim(), password, remember);
       } else {
         if (!keyPath) throw new Error('请选择 RSA 私钥文件');
-        await loginWithKey(username.trim(), await readKeyFile(keyPath));
+        await loginWithKey(username.trim(), await readKeyFile(keyPath), remember);
       }
     } catch (err) {
       setError(err instanceof ApiError || err instanceof Error ? err.message : '登录失败，请重试');
@@ -85,7 +94,7 @@ export default function ConnectPage() {
       prepare();
       await new Promise((r) => setTimeout(r, 0));
       if (!token.trim()) throw new Error('请粘贴管理 Token');
-      await loginWithToken(token.trim());
+      await loginWithToken(token.trim(), remember);
     } catch (err) {
       setError(err instanceof ApiError || err instanceof Error ? err.message : '登录失败，请重试');
     } finally {
@@ -202,11 +211,28 @@ export default function ConnectPage() {
                 <input type="checkbox" checked={insecure} onChange={(e) => setInsecure(e.target.checked)} />
                 信任自签名证书
               </label>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                记住此设备，下次自动登录
+              </label>
               {error && <div className="alert alert-bad">{error}</div>}
               <Button type="submit" disabled={busy}>
                 {busy ? <Loader2 size={16} className="spinner-icon" /> : <ArrowRight size={16} />}
                 {busy ? '正在连接…' : '连接并登录'}
               </Button>
+              {remembered.username && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    forgetCredentials();
+                    setUsername('');
+                    setPassword('');
+                  }}
+                >
+                  清除已保存的凭据
+                </button>
+              )}
             </form>
           ) : (
             <form onSubmit={submitAdmin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -233,11 +259,27 @@ export default function ConnectPage() {
                 <input type="checkbox" checked={insecure} onChange={(e) => setInsecure(e.target.checked)} />
                 信任自签名证书
               </label>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                记住此设备，下次自动登录
+              </label>
               {error && <div className="alert alert-bad">{error}</div>}
               <Button type="submit" disabled={busy}>
                 {busy ? <Loader2 size={16} className="spinner-icon" /> : <ShieldCheck size={16} />}
                 {busy ? '正在验证…' : '进入管理端'}
               </Button>
+              {remembered.hasToken && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    forgetCredentials();
+                    setToken('');
+                  }}
+                >
+                  清除已保存的 Token
+                </button>
+              )}
               <div className="hint-list">
                 <span className="row gap-8">
                   <Ticket size={14} /> 没有 Token？在服务端执行 <code className="mono">docker logs yuki-server</code> 获取。

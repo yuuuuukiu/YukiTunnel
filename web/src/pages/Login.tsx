@@ -12,13 +12,18 @@ import { ApiError } from '../lib/api';
  * what makes remote administration possible without knowing the password.
  */
 export default function LoginPage() {
-  const { login, loginWithKey, loginWithToken } = useAuth();
-  const [role, setRole] = useState<'user' | 'admin'>('user');
+  const { login, loginWithKey, loginWithToken, remembered, forgetCredentials } = useAuth();
+  const [role, setRole] = useState<'user' | 'admin'>(
+    remembered.mode === 'token' ? 'admin' : 'user',
+  );
 
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(remembered.username ?? '');
   const [password, setPassword] = useState('');
   const [privateKey, setPrivateKey] = useState('');
-  const [credMode, setCredMode] = useState<'password' | 'key'>('password');
+  const [credMode, setCredMode] = useState<'password' | 'key'>(
+    remembered.mode === 'key' ? 'key' : 'password',
+  );
+  const [remember, setRemember] = useState(true);
 
   const [token, setToken] = useState('');
 
@@ -33,10 +38,10 @@ export default function LoginPage() {
       if (!username.trim()) throw new Error('请输入用户名');
       if (credMode === 'password') {
         if (!password) throw new Error('请输入密码');
-        await login(username.trim(), password);
+        await login(username.trim(), password, remember);
       } else {
         if (!privateKey.trim()) throw new Error('请粘贴 RSA 私钥');
-        await loginWithKey(username.trim(), privateKey);
+        await loginWithKey(username.trim(), privateKey, remember);
       }
     } catch (err) {
       setError(err instanceof ApiError || err instanceof Error ? err.message : '登录失败，请重试');
@@ -51,7 +56,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       if (!token.trim()) throw new Error('请输入管理 Token');
-      await loginWithToken(token.trim());
+      await loginWithToken(token.trim(), remember);
     } catch (err) {
       setError(err instanceof ApiError || err instanceof Error ? err.message : '登录失败，请重试');
     } finally {
@@ -168,6 +173,10 @@ export default function LoginPage() {
                   />
                 </Field>
               )}
+              <label className="checkbox-row">
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                记住此设备，下次自动登录
+              </label>
               {error && (
                 <div className="alert alert-bad" role="alert">
                   {error}
@@ -177,6 +186,19 @@ export default function LoginPage() {
                 {busy ? <Loader2 size={16} className="spinner-icon" /> : <ShieldCheck size={16} />}
                 {busy ? '正在验证…' : '登录'}
               </Button>
+              {remembered.username && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    forgetCredentials();
+                    setUsername('');
+                    setPassword('');
+                  }}
+                >
+                  清除已保存的凭据
+                </button>
+              )}
             </form>
           ) : (
             <form onSubmit={submitAdmin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -197,6 +219,10 @@ export default function LoginPage() {
                   autoFocus
                 />
               </Field>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                记住此设备，下次自动登录
+              </label>
               {error && (
                 <div className="alert alert-bad" role="alert">
                   {error}
@@ -206,6 +232,18 @@ export default function LoginPage() {
                 {busy ? <Loader2 size={16} className="spinner-icon" /> : <ShieldCheck size={16} />}
                 {busy ? '正在验证…' : '进入管理控制台'}
               </Button>
+              {remembered.hasToken && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    forgetCredentials();
+                    setToken('');
+                  }}
+                >
+                  清除已保存的 Token
+                </button>
+              )}
               <div className="hint-list">
                 <span className="row gap-8">
                   <Ticket size={14} /> 没有 Token？在服务端执行 <code className="mono">docker logs yuki-server</code>。

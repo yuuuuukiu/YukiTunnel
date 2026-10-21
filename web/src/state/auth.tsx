@@ -9,15 +9,31 @@ interface AuthState {
   /** Base server URL for the desktop build; null means same origin. */
   serverUrl: string | null;
   setServerUrl: (url: string | null) => void;
-  login: (username: string, password: string) => Promise<void>;
-  loginWithKey: (username: string, privateKeyPem: string) => Promise<void>;
-  loginWithToken: (token: string) => Promise<void>;
+  login: (username: string, password: string, remember?: boolean) => Promise<void>;
+  loginWithKey: (username: string, privateKeyPem: string, remember?: boolean) => Promise<void>;
+  loginWithToken: (token: string, remember?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** remembered holds the fields the last sign-in saved for prefill. */
+  remembered: RememberedForm;
+  /** forgetCredentials drops the saved prefill without ending the session. */
+  forgetCredentials: () => void;
+}
+
+/** RememberedForm is the non-secret part of a saved sign-in, used to prefill. */
+export interface RememberedForm {
+  serverUrl?: string;
+  username?: string;
+  mode?: 'password' | 'token' | 'key';
+  /** True when a management token was stored, so the form can show a hint. */
+  hasToken?: boolean;
+  /** True when a password was stored (desktop only; see rememberPassword). */
+  hasPassword?: boolean;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 const STORAGE_KEY = 'yukitunnel.session';
+const REMEMBER_KEY = 'yukitunnel.remembered';
 
 /** apiBase turns a user-entered server URL into the API mount point. */
 export function apiBase(serverUrl: string | null): string {
@@ -30,6 +46,61 @@ interface StoredSession {
   token: string;
   serverUrl?: string;
   user?: User;
+}
+
+/**
+ * SavedSignIn is what "记住凭据" persists.
+ *
+ * The session token already keeps a user signed in across restarts, but it
+ * expires and is invalidated on logout, and it says nothing about which
+ * username or server to use. This record covers the case where the token is
+ * gone: the form comes back pre-filled instead of blank.
+ *
+ * Secrets are only stored when the user explicitly ticks the box. A management
+ * token is high privilege, so the caller must opt in every time; the password
+ * is never written by the web build (it would live in localStorage with no
+ * protection) and only by the desktop shell, where it can be kept in the OS
+ * keychain later.
+ */
+interface SavedSignIn {
+  serverUrl?: string;
+  username?: string;
+  mode?: 'password' | 'token' | 'key';
+  token?: string;
+  password?: string;
+}
+
+function readRemembered(): SavedSignIn | null {
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    return raw ? (JSON.parse(raw) as SavedSignIn) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * canStoreSecrets reports whether the host can protect a stored secret.
+ *
+ * In the browser, localStorage is readable by any script on the origin, so
+ * persisting a password there would be a downgrade. The desktop shell runs a
+ * single trusted bundle and can later move secrets to the OS keychain, so it
+ * is allowed to keep them.
+ */
+function canStoreSecrets(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+function writeRemembered(next: SavedSignIn | null) {
+  try {
+    if (next && Object.keys(next).length > 0) {
+      localStorage.setItem(REMEMBER_KEY, JSON.stringify(next));
+    } else {
+      localStorage.removeItem(REMEMBER_KEY);
+    }
+  } catch {
+    /* storage disabled or full; signing in still works, just not remembered */
+  }
 }
 
 function readSession(): StoredSession | null {
@@ -102,6 +173,17 @@ export function AuthProvider({ children, initialServerUrl = null }: { children: 
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [serverUrl, setServerUrlState] = useState<string | null>(initialServerUrl);
+  const [remembered, setRemembered] = useState<RememberedForm>(() => {
+    const saved = readRemembered();
+    if (!saved) return {};
+    return {
+      serverUrl: saved.serverUrl,
+      username: saved.username,
+      mode: saved.mode,
+      hasToken: Boolean(saved.token),
+      hasPassword: Boolean(saved.password),
+    };
+  });
   // A ref keeps the latest value available to callbacks without re-creating
   // them (and therefore without re-running the session restore effect).
   const serverUrlRef = useRef<string | null>(initialServerUrl);
@@ -134,6 +216,57 @@ export function AuthProvider({ children, initialServerUrl = null }: { children: 
     persist(null);
   }, [persist]);
 
+
+
+  /** saveRemembered records (or clears) the prefill for the next visit. */
+  const saveRemembered = useCallback((next: SavedSignIn | null) => {
+    writeRemembered(next);
+    if (!next) {
+      setRemembered({});
+      return;
+    }
+    setRemembered({
+      serverUrl: next.serverUrl,
+      username: next.username,
+      mode: next.mode,
+      hasToken: Boolean(next.token),
+      hasPassword: Boolean(next.password),
+    });
+  }, []);
+
+  /**
+   * autoSignIn retries the last sign-in with saved credentials.
+   *
+   * A session token expires (7 days by default) and is cleared on logout, but
+   * "记住此设备" is a promise that the app comes back ready to use. Only
+   * secrets the user opted to store are used here; a failure falls through to
+   * the normal login form without surfacing an error.
+   */
+  const autoSignIn = useCallback(async (url: string | null) => {
+    const saved = readRemembered();
+    if (!saved) return;
+    if (url) {
+      serverUrlRef.current = url;
+      setServerUrlState(url);
+      configureApi({ baseUrl: apiBase(url) });
+    }
+    try {
+      if (saved.token) {
+        configureApi({ token: saved.token });
+        const res = await api.me();
+        applySession({ token: saved.token, user: res.user });
+        return;
+      }
+      if (saved.username && saved.password) {
+        const res = await api.login(saved.username, saved.password);
+        applySession(res);
+      }
+    } catch {
+      // Saved credentials are stale; fall back to the form.
+      configureApi({ token: null });
+    }
+  }, [applySession]);
+
   useEffect(() => {
     setUnauthorizedHandler(() => clear());
     const saved = readSession();
@@ -144,7 +277,9 @@ export function AuthProvider({ children, initialServerUrl = null }: { children: 
       configureApi({ baseUrl: apiBase(url) });
     }
     if (!saved?.token) {
-      setLoading(false);
+      // No live session. If credentials were saved, sign in again silently so
+      // a restart does not interrupt the user with a login form.
+      void autoSignIn(url).finally(() => setLoading(false));
       return;
     }
     configureApi({ token: saved.token });
@@ -157,42 +292,67 @@ export function AuthProvider({ children, initialServerUrl = null }: { children: 
       })
       .catch(() => clear())
       .finally(() => setLoading(false));
+    // autoSignIn is stable (useCallback with [applySession]); listing it keeps
+    // the dependency honest without re-running the effect on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clear, persist]);
+  }, [clear, persist, autoSignIn]);
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (username: string, password: string, remember = false) => {
       const res = await api.login(username, password);
       applySession(res);
+      saveRemembered({
+        serverUrl: serverUrlRef.current ?? undefined,
+        username,
+        mode: 'password',
+        // The web build cannot protect a stored password, so only the desktop
+        // shell (which can move it to the keychain) is allowed to keep it.
+        password: remember && canStoreSecrets() ? password : undefined,
+      });
     },
-    [applySession],
+    [applySession, saveRemembered],
   );
 
   const loginWithKey = useCallback(
-    async (username: string, privateKeyPem: string) => {
+    async (username: string, privateKeyPem: string, remember = false) => {
       const challenge = await api.keyChallenge(username);
       const signature = await signNonce(privateKeyPem, challenge.nonce);
       const res = await api.keyLogin(username, challenge.nonce, signature);
       applySession(res);
+      // Never persist a private key; only remember who signed in.
+      saveRemembered({
+        serverUrl: serverUrlRef.current ?? undefined,
+        username,
+        mode: remember ? 'key' : undefined,
+      });
     },
-    [applySession],
+    [applySession, saveRemembered],
   );
 
   const loginWithToken = useCallback(
-    async (rawToken: string) => {
+    async (rawToken: string, remember = false) => {
       const cleanToken = rawToken.trim();
       if (!cleanToken) throw new Error('请输入 API Token');
       configureApi({ token: cleanToken });
       try {
         const res = await api.me();
         applySession({ token: cleanToken, user: res.user });
+        saveRemembered({
+          serverUrl: serverUrlRef.current ?? undefined,
+          mode: 'token',
+          token: remember ? cleanToken : undefined,
+        });
       } catch (err) {
         configureApi({ token: null });
         throw err;
       }
     },
-    [applySession],
+    [applySession, saveRemembered],
   );
+
+  const forgetCredentials = useCallback(() => {
+    saveRemembered(null);
+  }, [saveRemembered]);
 
   const logout = useCallback(async () => {
     try {
@@ -211,8 +371,16 @@ export function AuthProvider({ children, initialServerUrl = null }: { children: 
   }, [persist]);
 
   const value = useMemo(
-    () => ({ user, token, loading, serverUrl, setServerUrl, login, loginWithKey, loginWithToken, logout, refresh }),
-    [user, token, loading, serverUrl, setServerUrl, login, loginWithKey, loginWithToken, logout, refresh],
+    () => ({
+      user, token, loading, serverUrl, setServerUrl,
+      login, loginWithKey, loginWithToken, logout, refresh,
+      remembered, forgetCredentials,
+    }),
+    [
+      user, token, loading, serverUrl, setServerUrl,
+      login, loginWithKey, loginWithToken, logout, refresh,
+      remembered, forgetCredentials,
+    ],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

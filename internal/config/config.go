@@ -20,13 +20,17 @@ import (
 
 // Defaults for a fresh installation.
 const (
-	DefaultAPIAddr      = "0.0.0.0:8443"
-	DefaultControlAddr  = "0.0.0.0:9443"
-	DefaultDataDirName  = "yukitunnel"
-	DefaultPublicHost   = ""
-	DefaultPortRangeLo  = 20000
-	DefaultPortRangeHi  = 30000
-	DefaultTokenTTLHour = 24 * 7
+	DefaultAPIAddr     = "0.0.0.0:8443"
+	DefaultControlAddr = "0.0.0.0:9443"
+	DefaultDataDirName = "yukitunnel"
+	DefaultPublicHost  = ""
+	DefaultPortRangeLo = 20000
+	DefaultPortRangeHi = 30000
+	// DefaultTokenTTLHour is a compromise: long enough that "记住此设备" is
+	// meaningful (a daily re-login defeats the point), short enough that a
+	// stolen token stops working eventually. Tokens are revocable and hashed
+	// at rest, and the UI clears them on logout.
+	DefaultTokenTTLHour = 24 * 30
 )
 
 // Config is the on-disk server configuration.

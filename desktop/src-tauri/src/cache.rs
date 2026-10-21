@@ -1,14 +1,13 @@
 //! Stale WebView cache handling.
 //!
 //! Tauri pins WebKit's data directory to `~/Library/WebKit/<bundle-id>` and
-//! offers no configuration to disable HTTP caching. When the app is rebuilt
-//! with new frontend assets but keeps the same version, WebKit happily serves
-//! the previous `index.html` and JS bundle — the window looks identical to the
-//! old build, which is exactly the confusion this module prevents.
+//! offers no way to disable HTTP caching, so a rebuilt app can be served from
+//! the previous bundle's cache and look unchanged.
 //!
-//! The fix is deliberately blunt: on the first launch after the binary changes
-//! on disk, delete the cache directories. Local storage is left alone so a
-//! signed-in session survives the upgrade.
+//! The obvious fix — delete that whole directory — also throws away
+//! localStorage, which is where the saved session lives. The user then has to
+//! sign in again after every upgrade. So this module deletes only the asset
+//! caches and leaves the website data (localStorage, IndexedDB) alone.
 
 use std::fs;
 use std::path::PathBuf;
@@ -20,31 +19,37 @@ fn stamp_path() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".yukitunnel-webview-stamp"))
 }
 
-/// binary_mtime returns the mtime of the running executable.
 fn binary_mtime() -> Option<SystemTime> {
     let exe = std::env::current_exe().ok()?;
     fs::metadata(exe).ok()?.modified().ok()
 }
 
-/// cache_dirs lists the WebKit directories that hold rendered assets.
-fn cache_dirs() -> Vec<PathBuf> {
+/// bundle_ids lists the identifiers this app has shipped under.
+const BUNDLE_IDS: [&str; 2] = ["yukitunnel-desktop", "io.yukitunnel.desktop"];
+
+/// asset_cache_dirs are the directories that only hold rendered resources.
+///
+/// `~/Library/Caches/<id>` is pure HTTP cache. Inside
+/// `~/Library/WebKit/<id>` the subdirectories holding assets are
+/// `WebsiteData/LocalStorage` and friends — those must survive, so only the
+/// cache-ish children are listed here.
+fn asset_cache_dirs() -> Vec<PathBuf> {
     let Some(home) = std::env::var_os("HOME") else {
         return Vec::new();
     };
     let home = PathBuf::from(home);
-    // Both identifiers have been used across releases; clear whichever exists.
-    ["yukitunnel-desktop", "io.yukitunnel.desktop"]
-        .iter()
-        .flat_map(|id| {
-            [
-                home.join("Library/WebKit").join(id),
-                home.join("Library/Caches").join(id),
-            ]
-        })
-        .collect()
+    let mut dirs = Vec::new();
+    for id in BUNDLE_IDS {
+        dirs.push(home.join("Library/Caches").join(id));
+        let webkit = home.join("Library/WebKit").join(id);
+        // These two are safe: they cache decoded resources, not app state.
+        dirs.push(webkit.join("NetworkCache"));
+        dirs.push(webkit.join("CacheStorage"));
+    }
+    dirs
 }
 
-/// purge_if_version_changed clears the asset cache when the executable changed.
+/// purge_if_version_changed clears asset caches when the executable changed.
 ///
 /// Returns true when a purge actually happened, which the caller may log.
 pub fn purge_if_version_changed() -> bool {
@@ -66,8 +71,11 @@ pub fn purge_if_version_changed() -> bool {
         return false;
     }
 
-    for dir in cache_dirs() {
-        // Only remove directories that are clearly ours.
+    for dir in asset_cache_dirs() {
+        // Guard against a typo turning this into "delete something unrelated".
+        if !dir.to_string_lossy().contains("yukitunnel") {
+            continue;
+        }
         if dir.exists() {
             let _ = fs::remove_dir_all(&dir);
         }
@@ -83,11 +91,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cache_dirs_are_under_home() {
-        for dir in cache_dirs() {
+    fn never_targets_website_data() {
+        for dir in asset_cache_dirs() {
+            let s = dir.to_string_lossy();
+            assert!(s.contains("yukitunnel"), "unrelated path: {s}");
             assert!(
-                dir.to_string_lossy().contains("yukitunnel"),
-                "refusing to purge an unrelated path: {dir:?}"
+                !s.contains("LocalStorage") && !s.contains("IndexedDB"),
+                "must not delete persisted session data: {s}"
             );
         }
     }

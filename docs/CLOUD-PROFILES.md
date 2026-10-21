@@ -119,15 +119,18 @@ GitHub repo: yuuuuukiu/yukitunnel-profiles
 
 拉取顺序（每个源都必须通过签名校验，失败即跳过并记录）：
 
-1. jsDelivr `https://cdn.jsdelivr.net/gh/yuuuuukiu/yukitunnel-profiles@main/`
-2. GitHub raw `https://raw.githubusercontent.com/yuuuuukiu/yukitunnel-profiles/main/`
-3. 品牌镜像 `https://tunnel.yuuuuukiu.top/`（Cloudflare R2，需要 DNS 就绪）
+1. GitHub raw `https://raw.githubusercontent.com/yuuuuukiu/yukitunnel-profiles/main/`（**实时**）
+2. 品牌镜像 `https://tunnel.yuuuuukiu.top/`（Cloudflare R2，签名 workflow 同步，**实时**）
+3. jsDelivr `https://cdn.jsdelivr.net/gh/yuuuuukiu/yukitunnel-profiles@main/`（**CDN，发布后可能滞后数小时**）
 4. 用户自定义镜像（`--profile-mirror` / 设置页）
 5. 二进制内置副本（仅在**传输失败**时启用，见 §4bis）
 6. 本地缓存（仅在签名仍有效时使用，用于离线）
 
-> 顺序只影响延迟，不影响信任：每个源都要过 ed25519 验签。
-> 把 GitHub 系放在前面，是为了让「仓库刚公开、R2 还没配好」时也能立即使用。
+> 顺序只影响**新鲜度**，不影响信任：每个源都要过 ed25519 验签。
+>
+> **jsDelivr 排在最后**是有意的。它最快，但缓存 TTL 以小时计且 CI 无法 purge，
+> 发布新 profile 后用户可能半天装不到。两个源站镜像都是实时的，所以排在前面；
+> CDN 作为延迟兜底。
 
 代理：`--proxy http://…` 或 `socks5://…`，通过 `http.Transport.Proxy` 统一生效，**签名校验在解包前、代理之后仍然执行**。
 

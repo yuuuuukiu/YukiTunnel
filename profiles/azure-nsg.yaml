@@ -11,7 +11,7 @@ metadata:
   id: azure-nsg
   name: Azure 网络安全组
   vendor: azure
-  version: 1.0.0
+  version: 1.0.1
   maintainer: yukitunnel
   min_engine: 0.2.0
   description: |
@@ -110,6 +110,9 @@ spec:
 
     revoke_port_allowed:
       operation: SecurityRules_Delete
+      # DELETE, not the endpoint's PUT: sending PUT with an empty body would
+      # blank the rule instead of removing it.
+      method: DELETE
       params: {}
       success_when:
         status: 200

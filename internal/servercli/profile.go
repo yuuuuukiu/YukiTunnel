@@ -272,15 +272,16 @@ func newProfileCredentialCmd() *cobra.Command {
 
 func newProfileRunCmd() *cobra.Command {
 	var (
-		action   string
-		portMin  int
-		portMax  int
-		protocol string
-		cred     string
-		nodeID   string
-		paramKV  []string
-		dryRun   bool
-		ack      bool
+		action      string
+		portMin     int
+		portMax     int
+		protocol    string
+		cred        string
+		nodeID      string
+		paramKV     []string
+		dryRun      bool
+		ack         bool
+		showRequest bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run <profile-id>",
@@ -317,7 +318,7 @@ func newProfileRunCmd() *cobra.Command {
 			}
 			defer b.Close()
 			local := b.(*LocalBackend)
-			res, err := local.runProfile(ctx, args[0], action, params, cred, nodeID, dryRun, ack)
+			res, err := local.runProfile(ctx, args[0], action, params, cred, nodeID, dryRun, ack, showRequest)
 			if err != nil {
 				return err
 			}
@@ -330,6 +331,17 @@ func newProfileRunCmd() *cobra.Command {
 			}
 			if res.Skipped {
 				fmt.Printf("· %s\n", res.Message)
+				if pv := res.RequestPreview; pv != nil {
+					fmt.Println()
+					fmt.Printf("  %s %s\n", pv.Method, pv.URL)
+					for k, v := range pv.Headers {
+						fmt.Printf("  %s: %s\n", k, v)
+					}
+					if pv.Body != "" {
+						fmt.Println()
+						fmt.Println(pv.Body)
+					}
+				}
 				return nil
 			}
 			fmt.Printf("✓ %s 完成：%s\n", action, res.Message)
@@ -349,6 +361,8 @@ func newProfileRunCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&paramKV, "param", nil, "profile 参数 key=value，可重复")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "只渲染请求，不实际调用云 API")
 	cmd.Flags().BoolVar(&ack, "ack", false, "确认已知晓 profile 声明的云权限")
+	cmd.Flags().BoolVar(&showRequest, "show-request", false,
+		"配合 --dry-run：打印将要发送的完整请求（凭据自动打码）")
 	return cmd
 }
 

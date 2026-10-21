@@ -551,3 +551,22 @@ func TestRegistryUsesHTTP11(t *testing.T) {
 		t.Fatalf("expected HTTP/1.1, got %q", gotProto)
 	}
 }
+
+// TestDefaultMirrorsPreferFreshness pins the mirror order. jsDelivr caches for
+// hours and cannot be purged from CI, so putting it first meant clients kept
+// installing a superseded profile version after a publish. Origin-backed
+// mirrors must be tried before the CDN.
+func TestDefaultMirrorsPreferFreshness(t *testing.T) {
+	if len(DefaultMirrors) < 2 {
+		t.Fatalf("expected a fallback chain, got %d entries", len(DefaultMirrors))
+	}
+	for i, m := range DefaultMirrors {
+		if strings.Contains(m, "cdn.jsdelivr.net") && i != len(DefaultMirrors)-1 {
+			t.Fatalf("jsDelivr must be last (index %d of %d): %v", i, len(DefaultMirrors), DefaultMirrors)
+		}
+	}
+	// The first entry has to be cache-free, otherwise a publish is invisible.
+	if !strings.Contains(DefaultMirrors[0], "raw.githubusercontent.com") {
+		t.Fatalf("first mirror should be the raw origin, got %q", DefaultMirrors[0])
+	}
+}

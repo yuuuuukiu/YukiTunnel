@@ -24,20 +24,23 @@ import (
 
 // DefaultMirrors is the built-in fallback chain.
 //
-// Order matters for latency, not for trust: every mirror is untrusted
+// Order matters for freshness, not for trust: every mirror is untrusted
 // transport, and the ed25519 signature check is what makes the content
-// trustworthy. GitHub-hosted mirrors come first because they are available as
-// soon as the repository is public, while the branded mirror depends on DNS and
-// object storage being configured.
+// trustworthy.
+//
+// jsDelivr sits last on purpose. It is the fastest mirror, but its cache
+// lifetime is measured in hours and cannot be purged from CI, so a freshly
+// signed index can be invisible for most of a day. Putting it first meant
+// clients kept installing a superseded profile version while the origin
+// already had the new one. The two origin-backed mirrors are real-time, so they
+// go first and the CDN is a latency fallback.
 var DefaultMirrors = []string{
-	// Fast CDN over the GitHub repo; works with zero infrastructure.
-	"https://cdn.jsdelivr.net/gh/yuuuuukiu/yukitunnel-profiles@main",
-	// Raw GitHub: same bytes, no CDN cache in front.
+	// Raw GitHub: the origin, no cache in front.
 	"https://raw.githubusercontent.com/yuuuuukiu/yukitunnel-profiles/main",
-	// Branded mirror backed by Cloudflare R2. Requires a DNS record for
-	// tunnel.yuuuuukiu.top; until then this entry simply fails and the chain
-	// moves on.
+	// Branded mirror backed by Cloudflare R2; updated by the signing workflow.
 	"https://tunnel.yuuuuukiu.top",
+	// Fast CDN over the GitHub repo. May lag by hours after a publish.
+	"https://cdn.jsdelivr.net/gh/yuuuuukiu/yukitunnel-profiles@main",
 }
 
 // Options configures a Registry.

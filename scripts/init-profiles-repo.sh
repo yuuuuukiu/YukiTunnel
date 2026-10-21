@@ -203,6 +203,17 @@ jobs:
             echo "index unchanged"
           else
             git commit -m "chore: sign index"
+            # Another push may land between checkout and here (a manual sync,
+            # or a second dispatch). Rebase so the signed index is applied on
+            # top of the current tip instead of failing with "fetch first".
+            for attempt in 1 2 3; do
+              if git push; then
+                break
+              fi
+              echo "push rejected (attempt $attempt); rebasing on origin/main"
+              git pull --rebase --autostash origin main
+              sleep $((attempt * 3))
+            done
             git push
           fi
 
@@ -247,33 +258,68 @@ jobs:
       - name: Compare jsDelivr, raw and R2
         run: |
           set -euo pipefail
+          # Origin mirrors must match exactly; the jsDelivr CDN is allowed to
+          # lag, because its cache lifetime is measured in hours and cannot be
+          # purged from CI. It is still compared and reported as a warning.
           urls=(
-            "https://cdn.jsdelivr.net/gh/OWNER/yukitunnel-profiles@main/profiles/index.json"
             "https://raw.githubusercontent.com/OWNER/yukitunnel-profiles/main/profiles/index.json"
             "https://tunnel.yuuuuukiu.top/profiles/index.json"
           )
+          cdn_url="https://cdn.jsdelivr.net/gh/OWNER/yukitunnel-profiles@main/profiles/index.json"
+          # jsDelivr caches for minutes and R2 for a few hundred seconds, so a
+          # freshly pushed index can legitimately lag. Retry before failing:
+          # the point is to catch a mirror that is *permanently* stale, not to
+          # trip over normal CDN propagation.
           declare -a sums=()
-          for u in "${urls[@]}"; do
-            if body=$(curl -fsSL --max-time 20 "$u"); then
-              s=$(printf '%s' "$body" | sha256sum | cut -d' ' -f1)
-              echo "OK    $u  ${s:0:16}"
-              sums+=("$s")
-            else
-              echo "SKIP  $u (unreachable)"
+          for attempt in 1 2 3 4 5 6; do
+            sums=()
+            for u in "${urls[@]}"; do
+              # The R2 custom domain sits behind Cloudflare, which challenges
+              # curl's default UA. A browser UA is enough to get the bytes.
+              if body=$(curl -fsSL --max-time 20 \
+                  -A "Mozilla/5.0 (compatible; YukiTunnel-CI/1.0)" "$u"); then
+                s=$(printf '%s' "$body" | sha256sum | cut -d' ' -f1)
+                echo "OK    $u  ${s:0:16}"
+                sums+=("$s")
+              else
+                echo "SKIP  $u (unreachable)"
+              fi
+            done
+            if [ ${#sums[@]} -lt 2 ]; then
+              echo "::warning::fewer than two mirrors reachable; skipping comparison"
+              exit 0
+            fi
+            agree=1
+            first="${sums[0]}"
+            for s in "${sums[@]}"; do
+              [ "$s" != "$first" ] && agree=0
+            done
+            if [ "$agree" = "1" ]; then
+              echo "origin mirrors agree"
+              # Advisory CDN comparison: never fails the job.
+              if cdn=$(curl -fsSL --max-time 20 -A "Mozilla/5.0 (compatible; YukiTunnel-CI/1.0)" "$cdn_url" 2>/dev/null); then
+                cdn_sum=$(printf '%s' "$cdn" | sha256sum | cut -d' ' -f1)
+                if [ "$cdn_sum" = "$first" ]; then
+                  echo "CDN matches origin"
+                else
+                  echo "::warning::jsDelivr still serving ${cdn_sum:0:16} (origin ${first:0:16}); it will converge within its TTL"
+                fi
+              else
+                echo "::warning::jsDelivr unreachable"
+              fi
+              exit 0
+            fi
+            if [ "$attempt" -lt 6 ]; then
+              echo "mirrors still propagating (attempt $attempt/6); waiting 45s"
+              sleep 45
             fi
           done
-          if [ ${#sums[@]} -lt 2 ]; then
-            echo "::warning::fewer than two mirrors reachable; skipping comparison"
-            exit 0
-          fi
-          first="${sums[0]}"
-          for s in "${sums[@]}"; do
-            if [ "$s" != "$first" ]; then
-              echo "::error::mirrors disagree — a client could pin a stale index"
-              exit 1
-            fi
-          done
-          echo "all reachable mirrors agree"
+          echo "::error::origin mirrors disagree after 6 attempts — a client could pin a stale index"
+          exit 1
+
+          # Unreachable: the loop above only exits 0 or 1. The CDN check below
+          # is intentionally advisory so an hours-long jsDelivr cache does not
+          # block a release.
 YML
 sed -i.bak -e "s/OWNER-DOMAIN/$OWNER.top/g" -e "s/OWNER/$OWNER/g" -e "s/BUCKET_NAME/$BUCKET/g" "$WORK/.github-workflow-sign.yml" && rm -f "$WORK/.github-workflow-sign.yml.bak"
 

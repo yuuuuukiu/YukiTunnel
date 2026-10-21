@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 )
@@ -98,6 +99,10 @@ type RunOptions struct {
 	Params map[string]any
 	Creds  Credentials
 	DryRun bool
+	// ShowRequest includes the rendered request in a dry-run result, so an
+	// operator can confirm the exact method, URL, headers and body before any
+	// cloud call is made. Off by default because the body can be large.
+	ShowRequest bool
 	// ExtraHeaders lets the caller add tracing headers (never credentials).
 	ExtraHeaders map[string]string
 }
@@ -147,12 +152,16 @@ func (e *Engine) Run(ctx context.Context, p *Profile, opts RunOptions) (*Executi
 		return nil, fmt.Errorf("sign with %s: %w", signer.Name(), err)
 	}
 	if opts.DryRun {
-		return &ExecutionResult{
+		res := &ExecutionResult{
 			ProfileID: p.Metadata.ID, ProfileVer: p.Metadata.Version, ProfileHash: p.SHA256,
 			Action: opts.Action, Operation: action.Operation,
 			Host: mustHost(req.URL), Skipped: true,
 			Message: fmt.Sprintf("dry-run: %s %s（未发送请求）", req.Method, req.URL),
-		}, nil
+		}
+		if opts.ShowRequest {
+			res.RequestPreview = previewRequest(req)
+		}
+		return res, nil
 	}
 
 	// 3) Execute.
@@ -240,6 +249,11 @@ func (e *Engine) buildRequest(p *Profile, action Action, data map[string]any, ac
 		return nil, err
 	}
 	method := strings.ToUpper(p.Spec.Endpoint.Method)
+	// An action may override the method: Azure creates NSG rules with PUT but
+	// deletes them with DELETE, and one endpoint method cannot express both.
+	if m := strings.ToUpper(strings.TrimSpace(action.Method)); m != "" {
+		method = m
+	}
 	if method == "" {
 		method = http.MethodPost
 	}
@@ -645,4 +659,47 @@ func EnsurePath(base string, segs ...string) string {
 	}
 	u.Path = path.Join(append([]string{u.Path}, segs...)...)
 	return u.String()
+}
+
+// sensitiveHeaders are replaced in a preview so a dry-run can be shared safely.
+var sensitiveHeaders = map[string]bool{
+	"authorization":        true,
+	"x-amz-security-token": true,
+	"x-amz-signature":      true,
+	"proxy-authorization":  true,
+	"x-auth-token":         true,
+	"cookie":               true,
+}
+
+// previewRequest describes a rendered request without its credentials.
+//
+// A dry-run used to report only the URL, which is not enough to confirm that a
+// provider-specific body (Azure's properties block, GCP's allowed[].ports) is
+// shaped correctly. This lets an operator check the exact call before any
+// cloud API is touched, while redacting anything that carries a secret.
+func previewRequest(req *Request) *RequestPreview {
+	pv := &RequestPreview{Method: req.Method, URL: req.URL}
+	if len(req.Headers) > 0 {
+		pv.Headers = make(map[string]string, len(req.Headers))
+		for k, v := range req.Headers {
+			if sensitiveHeaders[strings.ToLower(k)] {
+				pv.Headers[k] = "<redacted>"
+				continue
+			}
+			pv.Headers[k] = v
+		}
+	}
+	switch {
+	case len(req.Body) > 0:
+		pv.Body = string(req.Body)
+	case len(req.FormBody) > 0:
+		// RPC providers send form-encoded bodies; render them for inspection.
+		parts := make([]string, 0, len(req.FormBody))
+		for k, v := range req.FormBody {
+			parts = append(parts, url.QueryEscape(k)+"="+url.QueryEscape(v))
+		}
+		sort.Strings(parts)
+		pv.Body = strings.Join(parts, "&")
+	}
+	return pv
 }

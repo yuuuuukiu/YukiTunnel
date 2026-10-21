@@ -55,7 +55,7 @@ func (l *LocalBackend) saveCredential(ctx context.Context, profileID, label stri
 
 // runProfile executes a profile locally.
 func (l *LocalBackend) runProfile(ctx context.Context, profileID, action string, params map[string]any,
-	credLabel, nodeID string, dryRun, ack bool) (*cloudprofile.ExecutionResult, error) {
+	credLabel, nodeID string, dryRun, ack, showRequest bool) (*cloudprofile.ExecutionResult, error) {
 	if !dryRun && !ack {
 		return nil, fmt.Errorf("请加 --ack 确认已知晓 profile 声明的云权限")
 	}
@@ -98,7 +98,8 @@ func (l *LocalBackend) runProfile(ctx context.Context, profileID, action string,
 		return nil, err
 	}
 	res, runErr := eng.Run(ctx, &doc, cloudprofile.RunOptions{
-		Action: action, Params: params, Creds: creds, DryRun: dryRun,
+		Action: action, Params: params, Creds: creds,
+		DryRun: dryRun, ShowRequest: showRequest,
 	})
 	run := &store.ProfileRun{
 		ID: ids.Hex(12), ProfileID: profileID, ProfileSHA: rec.SHA256, Action: action,

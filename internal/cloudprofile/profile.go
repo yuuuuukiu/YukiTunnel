@@ -92,7 +92,12 @@ type Parameter struct {
 
 // Action is one operation (ensure_port_allowed / revoke_port_allowed).
 type Action struct {
-	Operation       string           `yaml:"operation" json:"operation"`
+	Operation string `yaml:"operation" json:"operation"`
+	// Method overrides endpoint.method for this action only. A profile whose
+	// create is PUT but whose revoke is DELETE cannot express that with a
+	// single endpoint method, and silently sending PUT with an empty body
+	// clears the rule instead of removing it.
+	Method          string           `yaml:"method" json:"method,omitempty"`
 	Params          map[string]any   `yaml:"params" json:"params"`
 	IdempotentCheck *IdempotentCheck `yaml:"idempotent_check" json:"idempotent_check"`
 	SuccessWhen     *SuccessWhen     `yaml:"success_when" json:"success_when"`
@@ -239,4 +244,19 @@ type ExecutionResult struct {
 	Message     string        `json:"message"`
 	Duration    time.Duration `json:"duration_ms"`
 	RequestID   string        `json:"request_id,omitempty"`
+	// RequestPreview is only populated for dry-runs with ShowRequest, so an
+	// operator can verify the exact call before it reaches the cloud.
+	RequestPreview *RequestPreview `json:"request_preview,omitempty"`
+}
+
+// RequestPreview is a redacted, human-readable view of a rendered request.
+//
+// Credentials are never included: the Authorization header is replaced with a
+// placeholder before the request is described, so a preview can be pasted into
+// an issue without leaking a token.
+type RequestPreview struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    string            `json:"body,omitempty"`
 }

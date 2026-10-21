@@ -533,3 +533,66 @@ func TestGCPPortsArray(t *testing.T) {
 		t.Fatalf("GCP protocol = %v", rule["IPProtocol"])
 	}
 }
+
+// TestAzureRevokeUsesDelete pins the fix for a bug where revoke reused the
+// endpoint's PUT method. Azure creates rules with PUT and removes them with
+// DELETE; sending PUT with an empty body blanks the rule while leaving it in
+// place, so traffic stayed blocked and the rule looked "managed".
+func TestAzureRevokeUsesDelete(t *testing.T) {
+	raw, err := os.ReadFile("../../profiles/azure-nsg.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p Profile
+	if err := yaml.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("azure profile invalid: %v", err)
+	}
+
+	create, ok := p.Spec.Actions["ensure_port_allowed"]
+	if !ok {
+		t.Fatal("ensure_port_allowed missing")
+	}
+	if m := strings.ToUpper(create.Method); m != "" && m != "PUT" {
+		t.Fatalf("create should stay PUT (or inherit it), got %q", create.Method)
+	}
+
+	revoke, ok := p.Spec.Actions["revoke_port_allowed"]
+	if !ok {
+		t.Fatal("revoke_port_allowed missing")
+	}
+	if got := strings.ToUpper(revoke.Method); got != "DELETE" {
+		t.Fatalf("revoke must be DELETE, got %q", revoke.Method)
+	}
+}
+
+// TestActionMethodOverrideIsHonoured checks the engine-level behaviour rather
+// than the YAML alone: a profile that sets action.method must produce that verb.
+func TestActionMethodOverrideIsHonoured(t *testing.T) {
+	raw, err := os.ReadFile("../../profiles/azure-nsg.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p Profile
+	if err := yaml.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := NewEngine("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := eng.buildRequest(&p, p.Spec.Actions["revoke_port_allowed"], map[string]any{
+		"subscription_id": "sub",
+		"resource_group":  "rg",
+		"nsg_name":        "nsg",
+		"rule_name":       "rule",
+	}, "revoke_port_allowed")
+	if err != nil {
+		t.Fatalf("buildRequest: %v", err)
+	}
+	if req.Method != "DELETE" {
+		t.Fatalf("revoke request method = %q, want DELETE", req.Method)
+	}
+}

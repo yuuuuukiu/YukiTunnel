@@ -177,31 +177,35 @@ cp profiles/*.yaml internal/cloudprofile/bundled/
 go test ./internal/cloudprofile -run Bundled
 ```
 
-## 4ter. 已知限制：Cloudflare 代理的 R2 域名会拒绝 Go 客户端
+## 4ter. Cloudflare 代理的 R2 域名与 HTTP/2
 
-`tunnel.yuuuuukiu.top` 通过 Cloudflare 自定义域指向 R2 bucket。实测：
+`tunnel.yuuuuukiu.top` 通过 Cloudflare 自定义域指向 R2 bucket。Cloudflare 的
+bot 检测会挑战 **Go 的 HTTP/2 指纹**：
 
-| 客户端 | 结果 |
+| 协议 | 结果 |
 | --- | --- |
-| `curl`（OpenSSL/BoringSSL TLS 指纹） | `200` |
-| Go `crypto/tls`（任意 User-Agent） | `403` + `cf-mitigated: challenge` |
+| HTTP/2 | `403` + `cf-mitigated: challenge` |
+| HTTP/1.1 | `200` |
 
-差异来自 **TLS 指纹**而非请求头：换成浏览器 UA、`Accept`、`Connection: close`
-均无效。Cloudflare 的 bot 检测识别出 Go 的 ClientHello 特征并下发 JS 挑战。
+同一请求、同一 User-Agent，只改协议版本结果就不同。实测：
 
-影响与对策：
+```go
+run("default",  &http.Transport{})                                   // 403 HTTP/2.0
+run("no http2", &http.Transport{ForceAttemptHTTP2: false})           // 403 HTTP/2.0
+run("http1.1",  &http.Transport{TLSClientConfig: &tls.Config{
+    NextProtos: []string{"http/1.1"}}})                              // 200 HTTP/1.1
+```
 
-- **默认镜像链不受影响**：jsDelivr 与 GitHub raw 排在 R2 之前，正常情况下不会走到
-  R2。三个源的哈希已验证一致。
-- **强制只走 R2 会失败**：`YUKI_PROFILE_MIRRORS="https://tunnel.yuuuuukiu.top"`
-  会报 `HTTP 403 (challenge not passed)`。
-- 该失败被正确归类为**传输错误**（而非完整性错误），因此客户端仍会回退到内置
-  profile，不会中断。
+**处理方式**：registry 客户端固定使用 HTTP/1.1（`NextProtos: ["http/1.1"]`
++ `ForceAttemptHTTP2: false`）。索引和 profile 都是几十 KB 的小文件，放弃多路
+复用没有实际代价。`TestRegistryUsesHTTP11` 锁定这个行为。
 
-如果必须让 R2 成为主源，需要二选一：
+所以：
 
-1. 在 Cloudflare 关闭该 hostname 的 Bot Fight Mode / 安全级别调到 Essentially Off
-2. 改用不经 Cloudflare 代理的 R2 S3 端点（无缓存优势，但 Go 可直连）
+- 默认镜像链正常，R2 也能用
+- 强制只走 R2 也能用：`YUKI_PROFILE_MIRRORS="https://tunnel.yuuuuukiu.top"` ✅
+- 如果将来 Cloudflare 规则再变化导致 403，客户端会把它归类为**传输错误**并
+  回退到内置 profile，不会中断
 
 ## 5. 安全设计
 

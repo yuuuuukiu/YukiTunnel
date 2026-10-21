@@ -511,3 +511,43 @@ func TestLoadRejectsHashMismatchAborts(t *testing.T) {
 		t.Fatalf("hash mismatch must be an integrity failure, got %v", err)
 	}
 }
+
+// TestRegistryUsesHTTP11 pins the transport choice. Cloudflare-fronted mirrors
+// (the R2 custom domain) challenge Go's HTTP/2 fingerprint with 403 +
+// "cf-mitigated: challenge" while the same request over HTTP/1.1 returns 200,
+// so the client must not negotiate h2.
+func TestRegistryUsesHTTP11(t *testing.T) {
+	var gotProto string
+	var sawH2 bool
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotProto = r.Proto
+		if r.ProtoMajor == 2 {
+			sawH2 = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	f := newFixture(t, false)
+	r, err := New(Options{Mirrors: []string{srv.URL}, TrustedKeys: f.trusted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The test server uses a self-signed cert, so trust it for this probe only.
+	if tr, ok := r.client.Transport.(*http.Transport); ok {
+		tr.TLSClientConfig.InsecureSkipVerify = true
+	}
+	// Any request will do; the point is which protocol is negotiated.
+	_, _ = r.get(context.Background(), srv.URL+"/index.json", 1<<20)
+
+	if sawH2 {
+		t.Fatalf("registry client negotiated HTTP/2 (%s); Cloudflare challenges it", gotProto)
+	}
+	if gotProto != "HTTP/1.1" {
+		t.Fatalf("expected HTTP/1.1, got %q", gotProto)
+	}
+}

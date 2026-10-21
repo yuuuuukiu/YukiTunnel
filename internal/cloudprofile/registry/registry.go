@@ -91,7 +91,16 @@ func New(opts Options) (*Registry, error) {
 		return nil, errors.New("no trusted signing keys configured")
 	}
 	tr := &http.Transport{
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		// Force HTTP/1.1. Cloudflare's bot detection challenges Go's HTTP/2
+		// fingerprint with 403 + cf-mitigated: challenge, while the identical
+		// request over HTTP/1.1 succeeds. Measured against the R2 mirror:
+		// HTTP/2 -> 403, HTTP/1.1 -> 200. The registry only transfers small
+		// JSON/YAML documents, so losing multiplexing costs nothing.
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			NextProtos: []string{"http/1.1"},
+		},
+		ForceAttemptHTTP2:   false,
 		MaxIdleConnsPerHost: 2,
 		IdleConnTimeout:     30 * time.Second,
 		DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,

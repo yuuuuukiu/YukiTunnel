@@ -31,9 +31,17 @@ func (e *Error) WithDetails(kv map[string]any) *Error {
 }
 
 // As extracts an *Error from err, falling back to an opaque internal error.
+// As converts any error into an *Error suitable for a JSON response.
+//
+// A nil error yields a generic 500 rather than panicking: As is called from
+// deferred/error paths where the error can legitimately be nil, and a panic in
+// an HTTP handler would surface as a dropped connection instead of a response.
 func As(err error) *Error {
+	if err == nil {
+		return Internal("服务器内部错误")
+	}
 	var e *Error
-	if errors.As(err, &e) {
+	if errors.As(err, &e) && e != nil {
 		return e
 	}
 	return Internal(err.Error())
@@ -54,6 +62,18 @@ func Internal(msg string) *Error {
 }
 
 // Wrapf wraps a low-level error into an internal API error with context.
+// Wrapf adds context to err while preserving its HTTP semantics.
+//
+// Previously every wrapped error became a 500, so wrapping a 404 or 403 turned
+// it into "internal server error" and hid the real cause from the client.
 func Wrapf(err error, format string, args ...any) *Error {
-	return Internal(fmt.Sprintf(format, args...) + ": " + err.Error())
+	prefix := fmt.Sprintf(format, args...)
+	if err == nil {
+		return Internal(prefix)
+	}
+	var e *Error
+	if errors.As(err, &e) && e != nil {
+		return New(e.Status, e.Code, prefix+": "+e.Message)
+	}
+	return Internal(prefix + ": " + err.Error())
 }

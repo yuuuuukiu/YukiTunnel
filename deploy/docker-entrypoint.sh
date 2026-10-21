@@ -9,6 +9,16 @@ set -eu
 umask 077
 
 DATA_DIR="${YUKI_DATA_DIR:-/data}"
+
+# Read-only subcommands must not bootstrap: "docker run <image> --version" or
+# "doctor" is a diagnostic call, and creating config/TLS/database as a side
+# effect is both surprising and slow.
+case "${1:-}" in
+  --version|-v|version|--help|-h|help|completion|doctor)
+    exec yuki-server "$@"
+    ;;
+esac
+
 mkdir -p "$DATA_DIR"
 
 # `bootstrap` has its own positional parameters so the caller's "$@" (the

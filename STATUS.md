@@ -62,6 +62,7 @@ CI                    连续 9 次 success
 | tlsutil | 80.6% |
 | apierr | 79.2% |
 | ids | 75.0% |
+| wsnet | 95.0% |
 | cloudprofile/registry | 74.6% |
 | cloudprofile | 73.6% |
 | tunnel | 61.2% |
@@ -69,7 +70,7 @@ CI                    连续 9 次 success
 | server | 51.5% |
 | auth | 44.9% |
 | store | 36.4% |
-| cli / client / servercli / wsnet | 0%（靠 e2e 覆盖） |
+| cli / client / servercli | 0%（靠 e2e 与 smoke 覆盖） |
 
 ### 本轮发现并修复的真实缺陷
 
@@ -86,6 +87,10 @@ CI                    连续 9 次 success
 | `--json` 失败输出纯文本 | 脚本无法解析错误 |
 | HTTPS 隧道零测试 | 四种协议里唯一无覆盖的 |
 | `.gitignore` 漏 `secrets/` | 私钥可能被误提交 |
+| TLS 指纹不折叠大小写 | 手工复制的指纹永远匹配失败 |
+| `apierr.Wrapf` 吞掉状态码 | 404/403 被降级成 500，掩盖真实原因 |
+| `apierr.As(nil)` 会 panic | HTTP handler 崩溃而非返回错误 |
+| 登录限流桶不可重置 | 测试互相干扰，产生误导性 429 |
 
 ---
 

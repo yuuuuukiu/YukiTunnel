@@ -5,7 +5,7 @@
 | # | 验收标准 | 实现 | 验证方式 | 结果 |
 | --- | --- | --- | --- | --- |
 | 1 | `docker compose up -d` 启动服务端与 WebUI | `docker-compose.yml`、`Dockerfile`、`deploy/docker-entrypoint.sh` | `bash scripts/e2e-local.sh`（Docker 模式） | ✅ |
-| 2 | 桌面 GUI 一键部署后 WebUI 可访问 | `desktop/src-tauri/src/deploy.rs` | macOS DMG 实机运行 | ✅ 已验证 |
+| 2 | 桌面 GUI 一键部署后 WebUI 可访问 | `desktop/src-tauri/src/deploy.rs` | macOS DMG 实机：环境检测 → init → serve → 健康检查 → WebUI 200 → 登录成功 | ✅ 已验证 |
 | 3 | 服务端 CLI 完成初始化/用户/节点/域名/健康检查 | `internal/servercli` | `scripts/smoke.sh`、`scripts/e2e-local.sh` | ✅ |
 | 4 | 三端功能一致 | WebUI / 桌面端 / CLI | `TestAdminCreatesUserAndTunnel`、`TestDomainBindingToggle` | ✅ |
 | 5 | 客户端首次配置 + 密码/Key 登录 | `Connect.tsx`、`yuki login` | `TestKeyAuthFlow` | ✅ |

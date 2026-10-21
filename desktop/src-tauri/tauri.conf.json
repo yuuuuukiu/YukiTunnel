@@ -34,17 +34,38 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "YukiTunnel 内网穿透客户端与服务端管理端",
     "longDescription": "图形化创建与管理内网穿透隧道，内置服务端一键部署向导。",
     "resources": [],
-    "externalBin": ["binaries/yuki", "binaries/yuki-server"],
-    "macOS": { "minimumSystemVersion": "11.0" },
-    "windows": { "nsis": { "installMode": "currentUser" } },
-    "linux": { "deb": { "depends": [] } }
+    "externalBin": [
+      "binaries/yuki",
+      "binaries/yuki-server"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
   },
   "plugins": {
-    "shell": { "open": true }
+    "shell": {
+      "open": true
+    }
   }
 }

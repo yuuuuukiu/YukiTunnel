@@ -5,8 +5,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.0)}"
 COMMIT="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}"
+if [ -z "${VERSION:-}" ]; then
+  # Prefer an exact tag; otherwise pre-release form "0.1.0-<sha>" so a dev build
+  # never looks like a released version (git describe --always would return the
+  # bare commit hash and masquerade as the version).
+  if VERSION="$(git describe --tags --exact-match 2>/dev/null)"; then
+    :
+  else
+    VERSION="0.1.0-${COMMIT}"
+  fi
+fi
 LDFLAGS="-s -w -X github.com/yuuuuukiu/yukitunnel/internal/version.Version=${VERSION} -X github.com/yuuuuukiu/yukitunnel/internal/version.Commit=${COMMIT}"
 
 echo "==> Building WebUI"
@@ -19,14 +28,25 @@ else
 fi
 
 echo "==> Embedding WebUI"
+# The .keep file must survive: `go:embed all:webdist` fails on a fresh clone
+# when the directory is empty, so the placeholder is tracked in git.
+KEEP=internal/server/webdist/.keep
+KEEP_BACKUP=$(mktemp)
+[ -f "$KEEP" ] && cp "$KEEP" "$KEEP_BACKUP"
 rm -rf internal/server/webdist
 mkdir -p internal/server/webdist
 if [ -d web/dist ]; then
   cp -R web/dist/. internal/server/webdist/
 else
   echo "web/dist missing; server will start without a bundled UI" >&2
-  echo "placeholder" > internal/server/webdist/.keep
+  echo "placeholder" > "$KEEP"
 fi
+if [ -s "$KEEP_BACKUP" ] && [ ! -f "$KEEP" ]; then
+  # cp preserves mktemp's 0600; restore normal permissions explicitly.
+  cp "$KEEP_BACKUP" "$KEEP"
+  chmod 644 "$KEEP"
+fi
+rm -f "$KEEP_BACKUP"
 
 echo "==> Building Go binaries"
 mkdir -p bin

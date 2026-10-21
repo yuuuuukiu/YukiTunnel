@@ -127,16 +127,64 @@ jobs:
           [ -n "${PROFILE_SIGNING_KEY:-}" ] || { echo "::error::PROFILE_SIGNING_KEY is not set"; exit 1; }
           printf '%s' "$PROFILE_SIGNING_KEY" | base64 -d > /tmp/key.pem
           chmod 600 /tmp/key.pem
-          /tmp/yuki-profile-sign -dir profiles -key /tmp/key.pem -key-id "$PROFILE_KEY_ID"
+          /tmp/yuki-profile-sign -dir profiles -key /tmp/key.pem \
+            -key-id "$PROFILE_KEY_ID" -pub-out /tmp/pub.b64
 
-      - name: Verify the signature round-trips
+      - name: Stash signed output for verification
+        run: |
+          mkdir -p /tmp/registry/profiles
+          cp profiles/index.json profiles/index.json.sig /tmp/registry/profiles/
+
+      # Verify the documents we just produced with the public half of the same
+      # key. Running the main repo's registry tests instead would only exercise
+      # their own fixtures and prove nothing about this index.
+      - name: Verify the fresh signature
+        env:
+          PROFILE_KEY_ID: ${{ vars.PROFILE_KEY_ID || 'yuki-profiles-2026' }}
         run: |
           set -euo pipefail
           cd /tmp/yt
-          # The verifier lives in the main repo; run its registry tests against
-          # the freshly signed documents.
-          cp -R "$GITHUB_WORKSPACE/profiles/." profiles/
-          go test ./internal/cloudprofile/... -run 'Signature|Registry|Official' -count=1
+          cat > /tmp/verify_test.go <<'GO'
+          package registry
+
+          import (
+          	"crypto/ed25519"
+          	"encoding/base64"
+          	"os"
+          	"testing"
+          )
+
+          func TestFreshlySignedIndex(t *testing.T) {
+          	pubB64, err := os.ReadFile("/tmp/pub.b64")
+          	if err != nil {
+          		t.Fatal(err)
+          	}
+          	pub, err := base64.StdEncoding.DecodeString(string(trimNL(pubB64)))
+          	if err != nil || len(pub) != ed25519.PublicKeySize {
+          		t.Fatalf("bad public key: %v", err)
+          	}
+          	rawIndex, err := os.ReadFile("/tmp/registry/profiles/index.json")
+          	if err != nil {
+          		t.Fatal(err)
+          	}
+          	rawSig, err := os.ReadFile("/tmp/registry/profiles/index.json.sig")
+          	if err != nil {
+          		t.Fatal(err)
+          	}
+          	if _, err := VerifyIndex(rawIndex, rawSig, map[string]ed25519.PublicKey{"verifying": pub}); err != nil {
+          		t.Fatalf("index failed verification: %v", err)
+          	}
+          }
+
+          func trimNL(b []byte) string {
+          	for len(b) > 0 && (b[len(b)-1] == 10 || b[len(b)-1] == 13) {
+          		b = b[:len(b)-1]
+          	}
+          	return string(b)
+          }
+          GO
+          cp /tmp/verify_test.go internal/cloudprofile/registry/zz_fresh_test.go
+          go test ./internal/cloudprofile/registry -run TestFreshlySignedIndex -v -count=1
 
       - name: Commit signed index
         run: |
@@ -279,10 +327,51 @@ MANUAL
 fi
 
 echo
-echo "下一步（必须手动做一次）："
-echo "  1. gh secret set PROFILE_SIGNING_KEY --repo $OWNER/$REPO"
-echo "  2. gh variable set PROFILE_KEY_ID --repo $OWNER/$REPO --body yuki-profiles-2026"
-echo "  3. 在 Actions 里跑一次 'Sign registry'，生成 profiles/index.json{,.sig}"
-echo "  4. 验证："
-echo "       curl -fsSL https://cdn.jsdelivr.net/gh/$OWNER/$REPO@main/profiles/index.json | head -c 200"
-echo "       ./bin/yuki-server profile index"
+cat <<NEXT
+
+════════════════════════════════════════════════════════════════
+仓库已就绪：https://github.com/$OWNER/$REPO
+
+还需要两步才能出签名索引。
+
+── 1. 配置 4 个 Secret + 2 个 Variable ─────────────────────────
+
+  https://github.com/$OWNER/$REPO/settings/secrets/actions
+
+  Secrets（敏感值）:
+    PROFILE_SIGNING_KEY    base64 -w0 secrets/profile-signing.key
+    R2_ACCESS_KEY_ID       Cloudflare R2 Token 的 Access Key ID
+    R2_SECRET_ACCESS_KEY   Cloudflare R2 Token 的 Secret
+    R2_ENDPOINT            https://<account-id>.r2.cloudflarestorage.com
+
+  Variables（普通配置）:
+    R2_BUCKET              $BUCKET
+    PROFILE_KEY_ID         yuki-profiles-2026
+
+  命令行等价（gh 已登录时）:
+    gh secret set PROFILE_SIGNING_KEY --repo $OWNER/$REPO < <(base64 -w0 secrets/profile-signing.key)
+    gh secret set R2_ACCESS_KEY_ID     --repo $OWNER/$REPO
+    gh secret set R2_SECRET_ACCESS_KEY --repo $OWNER/$REPO
+    gh secret set R2_ENDPOINT          --repo $OWNER/$REPO
+    gh variable set R2_BUCKET      --repo $OWNER/$REPO --body $BUCKET
+    gh variable set PROFILE_KEY_ID --repo $OWNER/$REPO --body yuki-profiles-2026
+
+  完整说明见 docs/SETUP-SECRETS.md
+
+── 2. 跑一次签名 ──────────────────────────────────────────────
+
+  https://github.com/$OWNER/$REPO/actions
+    → "Sign and publish registry" → Run workflow
+
+  它会: 校验 profile → 生成 index.json{,.sig} → 提交 → 推送 R2 → 比对三源
+
+── 验证 ───────────────────────────────────────────────────────
+
+  curl -fsSL https://cdn.jsdelivr.net/gh/$OWNER/$REPO@main/profiles/index.json | head -c 200
+  curl -fsSL https://tunnel.yuuuuukiu.top/profiles/index.json | head -c 200
+  ./bin/yuki-server profile index
+
+  期望最后一行为「已验签（key_id: yuki-profiles-2026）」。
+  若显示 builtin，说明镜像还没生效，客户端退回了内置副本。
+════════════════════════════════════════════════════════════════
+NEXT

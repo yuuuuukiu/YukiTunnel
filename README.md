@@ -258,7 +258,7 @@ make help           # 全部命令
 
 ## 贡献
 
-欢迎 Issue 与 PR。
+欢迎 Issue 与 PR。开始之前请读 [CONTRIBUTING.md](CONTRIBUTING.md)（含环境搭建、提交前自检、几处容易踩的坑）与[行为准则](CODE_OF_CONDUCT.md)。
 
 - 新增云厂商 → [Profile 请求模板](.github/ISSUE_TEMPLATE/profile-request.md)
 - 报告 Bug → [Bug 模板](.github/ISSUE_TEMPLATE/bug-report.md)（请附 `yuki-server doctor` 输出）

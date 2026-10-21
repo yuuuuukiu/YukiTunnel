@@ -111,3 +111,23 @@ docker build -t ghcr.io/yuuuuukiu/yuki-server:0.2.0 .
 ```
 
 CI 建议矩阵：`ubuntu-latest`（Go 测试 + Docker 构建）、`macos-latest` / `windows-latest`（Tauri 打包）。
+
+### 桌面端与 WebUI 的代码共享
+
+管理页面只有一份实现，位于 `web/src/pages/admin/`。桌面端通过
+`desktop/src/pages/admin/*.tsx` 做一层再导出：
+
+```tsx
+export { default } from '@web/pages/admin/Users';
+```
+
+这样两端共用同一个组件、同一个 `@web/lib/api` 客户端，行为天然一致。
+新增管理页时：
+
+1. 在 `web/src/pages/admin/` 实现
+2. 在 `web/src/App.tsx` 注册路由
+3. 在 `desktop/src/pages/admin/` 加一行再导出
+4. 在 `desktop/src/App.tsx` 与 `desktop/src/pages/Layout.tsx` 的 `adminNav` 注册
+
+权限判断有两层：`RequireAdmin` 做 UI 重定向，服务端 `/api/v1/admin/*`
+对非管理员返回 403。前者只是体验优化，后者才是真正的边界。

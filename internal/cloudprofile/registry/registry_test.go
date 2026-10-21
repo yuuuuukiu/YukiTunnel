@@ -350,3 +350,70 @@ func TestIndexPathLayouts(t *testing.T) {
 		})
 	}
 }
+
+// TestChallengeRetryWithBrowserAgent covers mirrors behind a CDN that rejects
+// unfamiliar clients. Cloudflare answers 403 + cf-mitigated: challenge for the
+// default curl/Go agents but serves the file to a browser-like one, so a single
+// strict User-Agent would otherwise make profile delivery fail for everyone.
+func TestChallengeRetryWithBrowserAgent(t *testing.T) {
+	f := newFixture(t, false)
+
+	var sawChallenge, sawBrowser int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		agent := r.Header.Get("User-Agent")
+		if agent == registryUserAgentForTest || strings.HasPrefix(agent, "Go-http-client") {
+			sawChallenge++
+			w.Header().Set("cf-mitigated", "challenge")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte("<html>challenge</html>"))
+			return
+		}
+		sawBrowser++
+		http.FileServer(http.Dir(f.dir)).ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	r, err := New(Options{
+		Mirrors:     []string{srv.URL},
+		TrustedKeys: f.trusted,
+		UserAgent:   registryUserAgentForTest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh should have retried with a browser agent: %v", err)
+	}
+	if sawChallenge == 0 {
+		t.Fatal("expected the honest agent to be challenged at least once")
+	}
+	if sawBrowser == 0 {
+		t.Fatal("expected a retry with the fallback agent")
+	}
+}
+
+const registryUserAgentForTest = "yuki-server/profile-registry"
+
+// A 403 that survives the retry must be reported as a transport error, not as
+// an integrity failure: otherwise the caller would refuse to fall back to the
+// bundled profiles and the client would have nothing to install.
+func TestChallengeFailureStaysTransportError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("cf-mitigated", "challenge")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	f := newFixture(t, false)
+	r, _ := New(Options{Mirrors: []string{srv.URL}, TrustedKeys: f.trusted})
+	_, err := r.Refresh(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if errors.Is(err, ErrVerification) {
+		t.Fatalf("a blocked mirror is a transport problem, not tampering: %v", err)
+	}
+	if !strings.Contains(err.Error(), "challenge") {
+		t.Fatalf("error should explain the challenge: %v", err)
+	}
+}

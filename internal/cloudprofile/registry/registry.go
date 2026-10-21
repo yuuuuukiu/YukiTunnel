@@ -190,22 +190,59 @@ func (r *Registry) fetchFrom(ctx context.Context, mirror string) (*Index, error)
 }
 
 // get performs a bounded GET against a mirror.
+//
+// Some mirrors sit behind a CDN that challenges unfamiliar clients (Cloudflare
+// answers 403 with `cf-mitigated: challenge`). We send a descriptive
+// User-Agent because that is good manners and usually passes; if it does not,
+// retry once with a browser-like agent so a WAF rule cannot silently break
+// profile delivery.
 func (r *Registry) get(ctx context.Context, url string, limit int64) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, status, err := r.getOnce(ctx, url, limit, r.opts.UserAgent)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", r.opts.UserAgent)
+	if status == http.StatusOK {
+		return body, nil
+	}
+	if status == http.StatusForbidden || status == http.StatusTooManyRequests {
+		retryBody, retryStatus, retryErr := r.getOnce(ctx, url, limit, browserUserAgent)
+		if retryErr == nil && retryStatus == http.StatusOK {
+			return retryBody, nil
+		}
+		if retryErr != nil {
+			return nil, fmt.Errorf("HTTP %d (challenge retry failed: %v)", status, retryErr)
+		}
+		return nil, fmt.Errorf("HTTP %d (challenge not passed; the mirror is blocking automated clients)", retryStatus)
+	}
+	return nil, fmt.Errorf("HTTP %d", status)
+}
+
+// browserUserAgent is only used as a fallback when a CDN challenges the honest
+// agent. It is deliberately generic so we do not impersonate a specific product.
+const browserUserAgent = "Mozilla/5.0 (compatible; YukiTunnel/1.0; +https://github.com/yuuuuukiu/yukitunnel)"
+
+func (r *Registry) getOnce(ctx context.Context, url string, limit int64, agent string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("User-Agent", agent)
 	req.Header.Set("Accept", "application/json, application/yaml, text/plain")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		// Drain a little so the connection can be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+		return nil, resp.StatusCode, nil
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, limit))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return body, resp.StatusCode, nil
 }
 
 // Index returns the current index, refreshing if needed.

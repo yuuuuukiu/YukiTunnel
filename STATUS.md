@@ -48,13 +48,28 @@
 
 ```
 gofmt / go vet        无输出
-go test ./...         8 包全绿，130+ 个测试
+go test ./...         12 包全绿
 go test -race         全绿
 连续 3 次全量测试      稳定
-CI                    连续 6 次 success
-包覆盖率              cloudprofile 73.6% / registry 74.6% / tunnel 61.2%
-                      firewall 53.7% / server 51.5% / store 36.4%
+CI                    连续 9 次 success
 ```
+
+覆盖率（本轮从大量 0% 提升）：
+
+| 包 | 覆盖率 |
+| --- | --- |
+| config | 89.6% |
+| tlsutil | 80.6% |
+| apierr | 79.2% |
+| ids | 75.0% |
+| cloudprofile/registry | 74.6% |
+| cloudprofile | 73.6% |
+| tunnel | 61.2% |
+| firewall | 53.7% |
+| server | 51.5% |
+| auth | 44.9% |
+| store | 36.4% |
+| cli / client / servercli / wsnet | 0%（靠 e2e 覆盖） |
 
 ### 本轮发现并修复的真实缺陷
 

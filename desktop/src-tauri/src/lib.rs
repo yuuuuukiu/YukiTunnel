@@ -12,6 +12,7 @@
 
 mod agent;
 mod api;
+mod cache;
 mod deploy;
 mod sidecar;
 
@@ -25,6 +26,12 @@ pub fn run() {
         .manage(deploy::DeployState::default())
         .manage(agent::AgentState::default())
         .setup(|app| {
+            // WebKit on macOS keeps the previous bundle's JS in
+            // ~/Library/WebKit/<bundle-id>. After an upgrade that cache can
+            // serve the old UI, so a rebuilt window appears unchanged. Clear
+            // it once per build version; see cache.rs.
+            cache::purge_if_version_changed();
+
             let handle = app.handle().clone();
             let tray = tauri::tray::TrayIconBuilder::with_id("main")
                 .tooltip("YukiTunnel")

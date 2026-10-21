@@ -41,6 +41,11 @@ admin.txt
 internal/server/webdist/*
 !internal/server/webdist/.keep
 
+# Signing keys and other local secrets (scripts/gen-profile-signing-key.sh)
+/secrets/
+profile-signing.key
+profile-signing.pub
+
 # TypeScript incremental build cache
 *.tsbuildinfo
 

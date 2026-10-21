@@ -232,6 +232,7 @@ make help           # 全部命令
 | [docs/RELEASE-CHECKLIST.md](docs/RELEASE-CHECKLIST.md) | 发布检查清单 |
 | [docs/RELEASE-NOTES-v0.1.0.md](docs/RELEASE-NOTES-v0.1.0.md) | v0.1.0 发布说明 |
 | [SECURITY.md](SECURITY.md) | 威胁模型与漏洞报告 |
+| [docs/SETUP-SECRETS.md](docs/SETUP-SECRETS.md) | **Secrets 在哪里填、填什么**（照着做） |
 | [docs/SECRETS.md](docs/SECRETS.md) | 密钥与凭证管理（GitHub Secrets 安全模型） |
 
 ---
